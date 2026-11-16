@@ -114,6 +114,7 @@ struct DiscoverView: View {
                     }
                 }
                 .refreshable { await reload() }
+                .scrollsToTopOnReselect()
             }
         }
         .background(Theme.background)

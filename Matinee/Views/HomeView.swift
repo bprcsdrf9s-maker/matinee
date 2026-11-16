@@ -46,6 +46,7 @@ struct HomeView: View {
                 await model.refresh()
                 await home.load(model.boardCatalogs, force: true)
             }
+            .scrollsToTopOnReselect()
         }
         .background(Theme.background)
         .toolbar(.hidden, for: .navigationBar)

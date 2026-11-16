@@ -245,9 +245,39 @@ enum MainTab: String, CaseIterable, Identifiable {
     }
 }
 
+/// Counts taps on the tab that's already selected; each new value asks that tab's list to scroll back to the top.
+private struct ScrollToTopRequestKey: EnvironmentKey {
+    static let defaultValue = 0
+}
+
+extension EnvironmentValues {
+    var scrollToTopRequest: Int {
+        get { self[ScrollToTopRequestKey.self] }
+        set { self[ScrollToTopRequestKey.self] = newValue }
+    }
+}
+
+private struct ScrollsToTopOnReselect: ViewModifier {
+    @Environment(\.scrollToTopRequest) private var request
+    @State private var position = ScrollPosition(edge: .top)
+
+    func body(content: Content) -> some View {
+        content
+            .scrollPosition($position)
+            .onChange(of: request) { _, _ in
+                withAnimation(.snappy(duration: 0.35)) { position.scrollTo(edge: .top) }
+            }
+    }
+}
+
+extension View {
+    /// Put on a tab's main ScrollView: tapping that tab again scrolls it back to the top.
+    func scrollsToTopOnReselect() -> some View { modifier(ScrollsToTopOnReselect()) }
+}
+
 struct FloatingTabBar: View {
     @Binding var selection: MainTab
-    /// Tapping the current tab again pops it back to its first screen.
+    /// Tapping the current tab again: back to its first screen, or to the top if already there.
     var onReselect: (MainTab) -> Void = { _ in }
     @Namespace private var highlight
 

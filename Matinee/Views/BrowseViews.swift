@@ -148,6 +148,7 @@ struct LibraryView: View {
                 .padding(.top, 4)
             }
             .refreshable { await model.refreshLibrary() }
+            .scrollsToTopOnReselect()
             .overlay {
                 if items.isEmpty && !model.isRefreshing {
                     EmptyStateView(symbol: "square.stack", title: "Nothing saved yet",

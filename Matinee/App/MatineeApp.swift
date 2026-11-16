@@ -51,6 +51,7 @@ struct MainTabs: View {
     @State private var selection: MainTab = .board
     @State private var opened: Set<MainTab> = [.board]
     @State private var paths: [MainTab: NavigationPath] = [:]
+    @State private var scrollToTop: [MainTab: Int] = [:]
 
     var body: some View {
         ZStack {
@@ -59,6 +60,7 @@ struct MainTabs: View {
                     NavigationStack(path: path(for: tab)) {
                         root(tab).withMatineeDestinations()
                     }
+                    .environment(\.scrollToTopRequest, scrollToTop[tab] ?? 0)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         Color.clear.frame(height: Theme.tabBarClearance)
                     }
@@ -70,7 +72,12 @@ struct MainTabs: View {
         }
         .overlay(alignment: .bottom) {
             FloatingTabBar(selection: $selection) { tab in
-                paths[tab] = NavigationPath()
+                // First tap on the current tab goes back to its first screen; on that screen it scrolls to the top.
+                if let path = paths[tab], !path.isEmpty {
+                    paths[tab] = NavigationPath()
+                } else {
+                    scrollToTop[tab, default: 0] += 1
+                }
             }
             .padding(.bottom, 2)
         }
