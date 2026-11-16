@@ -104,7 +104,8 @@ final class MPVPlayerViewController: UIViewController {
 
     private func report() {
         guard player.started else { return }
-        session.tick(position: player.position, duration: player.duration, playing: !player.paused && !player.buffering)
+        session.tick(position: player.position, duration: player.duration, playing: !player.paused && !player.buffering,
+                     keepAwake: !player.paused)
     }
 
     private func loadAddonSubtitles() {

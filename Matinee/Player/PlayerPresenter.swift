@@ -54,7 +54,10 @@ final class PlaybackSession {
     }
 
     /// Called about once a second by the player.
-    func tick(position: Double, duration: Double, playing: Bool) {
+    func tick(position: Double, duration: Double, playing: Bool, keepAwake: Bool? = nil) {
+        // Keep the screen from dimming and locking while the video is playing; a paused video can sleep as usual.
+        let awake = !finished && (keepAwake ?? playing)
+        if UIApplication.shared.isIdleTimerDisabled != awake { UIApplication.shared.isIdleTimerDisabled = awake }
         guard position.isFinite else { return }
         // Count only normal playback as watched time, never jumps from seeking.
         if playing, let last = lastPosition, position > last, position - last < 3 {
@@ -74,6 +77,7 @@ final class PlaybackSession {
     func finish() {
         guard !finished else { return }
         finished = true
+        UIApplication.shared.isIdleTimerDisabled = false
         let nearEnd = duration > 0 && position > duration * ProgressRules.creditsThreshold
         LocalResume.save(nearEnd || position < 5 ? nil : position, for: request.resumeKey)
         sync(closing: true)
