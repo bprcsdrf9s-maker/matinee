@@ -24,6 +24,7 @@ struct MatineeApp: App {
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -35,6 +36,12 @@ struct RootView: View {
             }
         }
         .animation(.default, value: model.isSignedIn)
+        .onChange(of: scenePhase) { _, phase in
+            // Pick up changes made in Stremio on other devices when coming back to the app.
+            if phase == .active && model.isSignedIn {
+                Task { await model.refreshIfStale() }
+            }
+        }
     }
 }
 

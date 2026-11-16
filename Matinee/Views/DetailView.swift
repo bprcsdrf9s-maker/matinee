@@ -67,15 +67,25 @@ struct DetailView: View {
     // MARK: Header
 
     private var header: some View {
-        ZStack(alignment: .bottomLeading) {
-            RemoteImage(url: current.backdrop ?? current.poster, fallback: current.poster)
-                .frame(height: sizing.regular ? 480 : 330)
-                .frame(maxWidth: .infinity)
-                .clipped()
-            LinearGradient(colors: [.black.opacity(0.35), .clear, Theme.background.opacity(0.85), Theme.background],
-                           startPoint: .top, endPoint: .bottom)
+        // The backdrop sits in an overlay so a wide image can't widen the page and push content off-screen.
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: sizing.regular ? 480 : 330)
+            .overlay {
+                RemoteImage(url: current.backdrop ?? current.poster, fallback: current.poster)
+            }
+            .clipped()
+            .overlay {
+                LinearGradient(colors: [.black.opacity(0.35), .clear, Theme.background.opacity(0.85), Theme.background],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            .overlay(alignment: .bottomLeading) {
+                headerContent
+            }
+    }
 
-            VStack(alignment: .leading, spacing: 12) {
+    private var headerContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
                 if let logo = current.logo {
                     RemoteImage(url: logo, contentMode: .fit)
                         .frame(maxWidth: sizing.regular ? 420 : 260, maxHeight: sizing.regular ? 130 : 84, alignment: .leading)
@@ -88,9 +98,9 @@ struct DetailView: View {
                 metaLine
                 actionButtons
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, sizing.hPad)
             .padding(.bottom, 16)
-        }
     }
 
     private var metaLine: some View {

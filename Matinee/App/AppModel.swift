@@ -73,8 +73,17 @@ final class AppModel {
         }
     }
 
+    @ObservationIgnored private var lastRefresh: Date?
+
+    /// Reloads when returning to the app, at most once every 30 seconds.
+    func refreshIfStale() async {
+        if let lastRefresh, Date().timeIntervalSince(lastRefresh) < 30 { return }
+        await refresh()
+    }
+
     func refresh() async {
         guard let key = authKey, !isRefreshing else { return }
+        lastRefresh = Date()
         isRefreshing = true
         defer { isRefreshing = false }
         do {
