@@ -21,6 +21,7 @@ final class MPVMetalLayer: CAMetalLayer {
         }
     }
 
+    #if os(iOS)
     override var wantsExtendedDynamicRangeContent: Bool {
         get { super.wantsExtendedDynamicRangeContent }
         set {
@@ -31,6 +32,7 @@ final class MPVMetalLayer: CAMetalLayer {
             }
         }
     }
+    #endif
 }
 
 /// A thin wrapper around libmpv (via MPVKit), rendering with Vulkan/MoltenVK into a Metal layer,
