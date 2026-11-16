@@ -29,14 +29,22 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if model.isSignedIn {
+            if model.choosingProfile {
+                ProfilePickerView()
+                    .transition(.opacity)
+            } else if model.isSignedIn {
                 MainTabs()
+                    .id(model.activeProfileId)
                     .task { await model.refresh() }
             } else {
                 SignInView()
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if model.activeProfile != nil { ProfileSignInHeader() }
+                    }
             }
         }
         .animation(.default, value: model.isSignedIn)
+        .animation(.default, value: model.choosingProfile)
         .onChange(of: scenePhase) { _, phase in
             // Pick up changes made in Stremio on other devices when coming back to the app.
             if phase == .active && model.isSignedIn {

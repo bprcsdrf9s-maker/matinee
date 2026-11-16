@@ -14,13 +14,13 @@ cp Matinee/Assets.xcassets/AppIcon.appiconset/icon-1024.png icon.png
 
 cat > source.json <<JSON
 {
-  "name": "Matinee",
+  "name": "Watcher",
   "identifier": "com.daniel.matinee.source",
   "subtitle": "Your Stremio library, played natively.",
   "iconURL": "${BASE}/icon.png",
   "apps": [
     {
-      "name": "Matinee",
+      "name": "Watcher",
       "bundleIdentifier": "com.daniel.matinee",
       "developerName": "Daniel",
       "subtitle": "Stremio on iPhone and iPad",
@@ -66,12 +66,12 @@ fi
 
 gh release create "$TAG" "${ASSETS[@]}" \
   --repo "$REPO" \
-  --title "Matinee ${VERSION}" \
+  --title "Watcher ${VERSION}" \
   --notes "$NOTES" \
   --latest
 
 {
-  echo "## Matinee ${VERSION} is ready"
+  echo "## Watcher ${VERSION} is ready"
   echo ""
   echo "Add this source in AltStore or SideStore:"
   echo ""

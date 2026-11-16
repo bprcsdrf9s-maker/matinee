@@ -107,6 +107,10 @@ enum DiskCache {
         try? Data(contentsOf: folder.appendingPathComponent(name))
     }
 
+    static func remove(_ name: String) {
+        try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+    }
+
     static func clear() {
         try? FileManager.default.removeItem(at: folder)
     }

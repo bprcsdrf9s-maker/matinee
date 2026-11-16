@@ -4,8 +4,10 @@ import SwiftUI
 struct TVHomeView: View {
     @Environment(AppModel.self) private var model
     @State private var home = HomeModel()
+    @State private var recs = RecommendationsModel()
     @State private var focused: MetaItem?
     @State private var hero: MetaItem?
+    @AppStorage(TMDB.keyVersionDefaultsKey) private var tmdbKeyVersion = 0
 
     var body: some View {
         ScrollView {
@@ -14,6 +16,18 @@ struct TVHomeView: View {
 
                 if !model.continueWatching.isEmpty {
                     continueRow
+                }
+
+                ForEach(recs.leadingRows) { row in
+                    TVPosterRow(title: row.title, items: row.items, onFocus: { focused = $0 })
+                }
+
+                if !model.savedLibrary.isEmpty {
+                    TVPosterRow(title: "My List", items: model.savedLibrary.prefix(30).map(\.asMeta), onFocus: { focused = $0 })
+                }
+
+                ForEach(recs.trailingRows) { row in
+                    TVPosterRow(title: row.title, items: row.items, onFocus: { focused = $0 })
                 }
 
                 ForEach(home.rows) { row in
@@ -28,7 +42,7 @@ struct TVHomeView: View {
 
                 if home.loading {
                     ProgressView().frame(maxWidth: .infinity).padding(.top, 80)
-                } else if home.rows.isEmpty && model.continueWatching.isEmpty {
+                } else if home.rows.isEmpty && model.continueWatching.isEmpty && recs.leadingRows.isEmpty {
                     if let error = model.errorMessage {
                         EmptyStateView(symbol: "wifi.exclamationmark", title: "Couldn't load", message: error)
                     } else if !model.addons.isEmpty {
@@ -42,6 +56,11 @@ struct TVHomeView: View {
         .background { TVBackdrop(meta: hero) }
         .task(id: model.addons.map(\.transportUrl)) {
             await home.load(model.boardCatalogs)
+            if hero == nil { hero = home.rows.first?.items.first }
+        }
+        .task(id: "\(model.activeProfileId ?? "")|\(model.library.count)|\(tmdbKeyVersion)") {
+            await recs.load(library: model.library, profileId: model.activeProfileId)
+            if focused == nil, let pick = recs.heroCandidates.randomElement() { hero = pick }
         }
         .task(id: focused?.id) {
             // Wait for focus to settle so quick scrolling doesn't flash every backdrop.
@@ -50,7 +69,9 @@ struct TVHomeView: View {
             hero = focused
         }
         .onAppear {
-            if hero == nil { hero = model.continueWatching.first?.asMeta ?? home.rows.first?.items.first }
+            if hero == nil {
+                hero = recs.heroCandidates.first ?? model.continueWatching.first?.asMeta ?? home.rows.first?.items.first
+            }
         }
     }
 

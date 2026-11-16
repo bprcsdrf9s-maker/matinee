@@ -23,7 +23,7 @@ struct SignInView: View {
                         Image(systemName: "play.tv.fill")
                             .font(.system(size: 54))
                             .foregroundStyle(Theme.accent)
-                        Text("Matinee").font(.system(size: 40, weight: .heavy))
+                        Text("Watcher").font(.system(size: 40, weight: .heavy))
                         Text("Sign in with your Stremio account.\nYour addons, library and progress come with you.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -177,10 +177,21 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("Account") {
-                LabeledContent("Stremio", value: model.email ?? "Signed in")
-                Button("Sign Out", role: .destructive) { confirmSignOut = true }
+            Section("Profile") {
+                if let profile = model.activeProfile {
+                    HStack(spacing: 12) {
+                        ProfileAvatar(avatar: profile.avatar, size: 44)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(profile.name).font(.body.weight(.semibold))
+                            Text(model.email ?? "Signed in to Stremio").font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Button("Switch Profile") { model.choosingProfile = true }
+                Button("Sign Out and Remove Profile", role: .destructive) { confirmSignOut = true }
             }
+
+            TMDBKeySection()
 
             Section {
                 Picker("Player", selection: $engine) {
@@ -243,8 +254,59 @@ struct SettingsView: View {
         .background(Theme.background)
         .navigationTitle("Settings")
         .onAppear { badCount = BadStreams.count }
-        .confirmationDialog("Sign out of Stremio?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+        .confirmationDialog("Sign out and remove \(model.activeProfile?.name ?? "this profile")?",
+                            isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign Out", role: .destructive) { model.signOut() }
+        } message: {
+            Text("The profile's Stremio library stays in its account; sign in again any time.")
+        }
+    }
+}
+
+/// Where the TMDB key for recommendations goes.
+struct TMDBKeySection: View {
+    @State private var key = TMDB.apiKey ?? ""
+    @State private var status: String?
+    @State private var checking = false
+
+    var body: some View {
+        Section {
+            SecureField("API key or read access token", text: $key)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button {
+                Task { await save() }
+            } label: {
+                HStack {
+                    Text(TMDB.isConfigured ? "Update Key" : "Save Key")
+                    if checking { Spacer(); ProgressView() }
+                }
+            }
+            .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty || checking)
+            if TMDB.isConfigured {
+                Button("Remove Key", role: .destructive) {
+                    TMDB.apiKey = nil
+                    key = ""
+                    status = "Removed. Recommendation rows are off."
+                }
+            }
+        } header: {
+            Text("Recommendations")
+        } footer: {
+            VStack(alignment: .leading, spacing: 6) {
+                if let status { Text(status).foregroundStyle(.primary) }
+                Text("\"Recommended for You\", \"Trending Now\" and \"Because You Watched\" come from The Movie Database. Get a free key at themoviedb.org → Settings → API, then paste it here.")
+            }
+        }
+    }
+
+    private func save() async {
+        checking = true
+        defer { checking = false }
+        if await TMDB.validate(key) {
+            status = "Key works. Recommendations will show on Home."
+        } else {
+            status = "TMDB didn't accept that key. Check it and try again."
         }
     }
 }

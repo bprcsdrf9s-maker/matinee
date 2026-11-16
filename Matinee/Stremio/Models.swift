@@ -205,6 +205,14 @@ struct MetaItem: Decodable, Identifiable, Hashable {
         imdbRating = nil; genres = []; videos = []; defaultVideoId = nil
     }
 
+    /// A preview built from another catalog (TMDB). The full details load from the addons when opened.
+    init(id: String, type: String, name: String, poster: URL?, background: URL?,
+         description: String?, releaseInfo: String?, imdbRating: String?) {
+        self.id = id; self.type = type; self.name = name; self.poster = poster; self.background = background
+        self.description = description; self.releaseInfo = releaseInfo; self.imdbRating = imdbRating
+        posterShape = nil; logo = nil; runtime = nil; genres = []; videos = []; defaultVideoId = nil
+    }
+
     static func == (l: MetaItem, r: MetaItem) -> Bool { l.id == r.id && l.type == r.type }
     func hash(into hasher: inout Hasher) { hasher.combine(id); hasher.combine(type) }
 

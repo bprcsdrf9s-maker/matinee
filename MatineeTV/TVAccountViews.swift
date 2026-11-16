@@ -19,7 +19,7 @@ struct TVSignInView: View {
             VStack(spacing: 28) {
                 HStack(spacing: 18) {
                     Image(systemName: "play.circle.fill").font(.system(size: 64)).foregroundStyle(Theme.accent)
-                    Text("Matinee").font(.system(size: 72, weight: .heavy))
+                    Text("Watcher").font(.system(size: 72, weight: .heavy))
                 }
                 Text("Scan with your phone to sign in")
                     .font(.title3.weight(.semibold))
@@ -163,6 +163,12 @@ struct TVSettingsView: View {
                     .font(.system(size: 120))
                     .foregroundStyle(Theme.accent)
                 Text("Settings").font(.title.weight(.bold))
+                if let profile = model.activeProfile {
+                    HStack(spacing: 16) {
+                        ProfileAvatar(avatar: profile.avatar, size: 64)
+                        Text(profile.name).font(.headline)
+                    }
+                }
                 Text(model.email ?? "Signed in to Stremio")
                     .font(.callout).foregroundStyle(.secondary)
                 Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0")")
@@ -172,6 +178,14 @@ struct TVSettingsView: View {
             .padding(.top, 60)
 
             Form {
+                Section {
+                    Button("Switch Profile") { model.choosingProfile = true }
+                } header: {
+                    Text("Profile")
+                }
+
+                TVTMDBKeySection()
+
                 Section {
                     Picker("Player", selection: $engine) {
                         ForEach(PlayerEngine.allCases) { Text($0.label).tag($0.rawValue) }
@@ -239,14 +253,50 @@ struct TVSettingsView: View {
                 }
 
                 Section {
-                    Button("Sign Out", role: .destructive) { confirmSignOut = true }
+                    Button("Sign Out and Remove Profile", role: .destructive) { confirmSignOut = true }
                 }
             }
         }
         .background(Theme.background.ignoresSafeArea())
         .onAppear { badCount = BadStreams.count }
-        .confirmationDialog("Sign out of Stremio?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+        .confirmationDialog("Sign out and remove \(model.activeProfile?.name ?? "this profile")?",
+                            isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign Out", role: .destructive) { model.signOut() }
+        }
+    }
+}
+
+/// TMDB key for recommendations. Typing is easiest from an iPhone's Apple TV keyboard prompt.
+struct TVTMDBKeySection: View {
+    @State private var key = TMDB.apiKey ?? ""
+    @State private var status: String?
+    @State private var checking = false
+
+    var body: some View {
+        Section {
+            TextField("TMDB API key or read access token", text: $key)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            Button(checking ? "Checking…" : (TMDB.isConfigured ? "Update Key" : "Save Key")) {
+                Task {
+                    checking = true
+                    status = await TMDB.validate(key) ? "Key works. Recommendations will show on Home."
+                                                      : "TMDB didn't accept that key."
+                    checking = false
+                }
+            }
+            .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty || checking)
+            if TMDB.isConfigured {
+                Button("Remove Key", role: .destructive) {
+                    TMDB.apiKey = nil
+                    key = ""
+                    status = "Removed."
+                }
+            }
+        } header: {
+            Text("Recommendations")
+        } footer: {
+            Text(status ?? "Recommended for You, Trending Now and Because You Watched come from The Movie Database. Get a free key at themoviedb.org → Settings → API.")
         }
     }
 }

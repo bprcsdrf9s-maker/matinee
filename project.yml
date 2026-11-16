@@ -42,7 +42,7 @@ targets:
     info:
       path: Matinee/Info.plist
       properties:
-        CFBundleDisplayName: Matinee
+        CFBundleDisplayName: Watcher
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true
@@ -97,7 +97,7 @@ targets:
     info:
       path: MatineeTV/Info.plist
       properties:
-        CFBundleDisplayName: Matinee
+        CFBundleDisplayName: Watcher
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UIRequiredDeviceCapabilities: [arm64]

@@ -68,6 +68,7 @@ final class MPVPlayerViewController: UIViewController {
         self.host = host
 
         scrub.onSeek = { [weak self] seconds in self?.session.seeked(to: seconds) }
+        scrub.source = (request.url, request.headers)
         // Swiping on the clickpad scrubs the timeline, like the Apple TV app.
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
@@ -163,6 +164,7 @@ final class MPVPlayerViewController: UIViewController {
         guard !closed else { return }
         closed = true
         scrub.stopHold()
+        scrub.closePreviews()
         report()
         timer?.invalidate()
         timer = nil
@@ -191,9 +193,11 @@ extension MPVPlayerViewController: UIGestureRecognizerDelegate {
         case .began:
             scrub.panBegan()
         case .changed:
-            // A swipe the width of the screen moves through half the movie.
+            // A swipe the width of the screen moves about a tenth of the movie (4 to 12 minutes),
+            // so the marker can be placed precisely; keep swiping to go further.
             let width = max(1, view.bounds.width)
-            scrub.panChanged(fraction: Double(gesture.translation(in: view).x / width) * 0.5)
+            let perSwipe = min(max(player.duration * 0.1, 240), 720)
+            scrub.panChanged(seconds: Double(gesture.translation(in: view).x / width) * perSwipe)
         case .ended, .cancelled, .failed:
             scrub.panEnded()
         default:
@@ -232,7 +236,15 @@ extension MPVPlayerViewController: UIGestureRecognizerDelegate {
 @MainActor
 final class TVScrubber: ObservableObject {
     /// Where the marker is while scrubbing; nil when not scrubbing.
-    @Published private(set) var target: Double?
+    @Published private(set) var target: Double? {
+        didSet { if let target { thumbnails?.request(target) } }
+    }
+    /// The newest preview frame and the time it shows.
+    @Published private(set) var preview: UIImage?
+    @Published private(set) var previewTime: Double?
+    /// The stream, for the preview player.
+    var source: (url: URL, headers: [String: String])?
+    private var thumbnails: MPVThumbnailer?
     /// Set by the controls while the options panel or an error covers the player.
     var blocked = false
     var onSeek: ((Double) -> Void)?
@@ -256,6 +268,7 @@ final class TVScrubber: ObservableObject {
 
     private func begin() {
         guard target == nil else { return }
+        startPreviews()
         wasPlaying = !player.paused
         if wasPlaying { player.pause() }
         target = player.position
@@ -277,9 +290,26 @@ final class TVScrubber: ObservableObject {
         panStart = target ?? player.position
     }
 
-    func panChanged(fraction: Double) {
+    func panChanged(seconds: Double) {
         guard player.duration > 0 else { return }
-        target = clamp(panStart + fraction * player.duration)
+        target = clamp(panStart + seconds)
+    }
+
+    /// Opens the preview player the first time scrubbing starts; it stays open for later scrubs.
+    private func startPreviews() {
+        guard thumbnails == nil, let source else { return }
+        let t = MPVThumbnailer(url: source.url, headers: source.headers)
+        t.onImage = { [weak self] image, time in
+            guard let self else { return }
+            self.preview = image
+            self.previewTime = time
+        }
+        thumbnails = t
+    }
+
+    func closePreviews() {
+        thumbnails?.close()
+        thumbnails = nil
     }
 
     func panEnded() {
@@ -322,6 +352,7 @@ final class TVScrubber: ObservableObject {
         guard let t = target else { return }
         stopHold()
         target = nil
+        preview = nil
         player.seek(to: t)
         onSeek?(t)
         if wasPlaying { player.play() }
@@ -331,6 +362,7 @@ final class TVScrubber: ObservableObject {
         guard target != nil else { return }
         stopHold()
         target = nil
+        preview = nil
         if wasPlaying { player.play() }
     }
 }
@@ -541,17 +573,14 @@ struct TVMPVControlsView: View {
                         Capsule().fill(.white)
                             .frame(width: 6, height: 36)
                             .offset(x: geo.size.width * marker - 3)
-                        Text(Format.clock(shown))
-                            .font(.title3.weight(.bold).monospacedDigit())
-                            .padding(.horizontal, 18).padding(.vertical, 8)
-                            .background(.ultraThinMaterial, in: Capsule())
-                            .fixedSize()
-                            .position(x: min(max(geo.size.width * marker, 80), geo.size.width - 80), y: -40)
+                        ScrubPreviewCard(image: scrub.preview, time: shown)
+                            .position(x: min(max(geo.size.width * marker, 200), geo.size.width - 200),
+                                      y: -(ScrubPreviewCard.height / 2) - 34)
                     }
                 }
             }
             .frame(height: 10)
-            .padding(.top, scrub.active ? 56 : 0)
+            .padding(.top, scrub.active ? ScrubPreviewCard.height + 50 : 0)
             HStack {
                 Text(Format.clock(scrub.target ?? player.position))
                 Spacer()
@@ -658,5 +687,42 @@ struct TVMPVControlsView: View {
         .padding(60)
         .frame(maxWidth: 900)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 30))
+    }
+}
+
+/// The frame preview above the scrub marker, with the time under it, like the Apple TV app.
+struct ScrubPreviewCard: View {
+    let image: UIImage?
+    let time: Double
+
+    static let width: CGFloat = 384
+    static let height: CGFloat = 216 + 52
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Color.black
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                } else {
+                    ProgressView()
+                }
+            }
+            .frame(width: Self.width, height: 216)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.85), lineWidth: 3)
+            }
+            .shadow(color: .black.opacity(0.6), radius: 18, y: 6)
+
+            Text(Format.clock(time))
+                .font(.title3.weight(.bold).monospacedDigit())
+                .padding(.horizontal, 16).padding(.vertical, 4)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+        .fixedSize()
+        .animation(.easeOut(duration: 0.12), value: image)
     }
 }

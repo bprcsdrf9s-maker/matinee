@@ -21,12 +21,123 @@ final class AppModel {
 
     @ObservationIgnored private var syncChain: Task<Void, Never>?
 
+    // MARK: Profiles
+
+    private(set) var profiles: [Profile] = []
+    private(set) var activeProfileId: String?
+    /// Showing the "Who's watching?" screen.
+    var choosingProfile = false
+
+    var activeProfile: Profile? { profiles.first { $0.id == activeProfileId } }
+
+    /// A profile that was just added and hasn't signed in to Stremio yet.
+    var isAddingProfile: Bool { activeProfile != nil && authKey == nil }
+
     var isSignedIn: Bool { authKey != nil }
 
+    /// Cache files are kept per profile so switching shows the right library straight away.
+    private func cacheName(_ base: String) -> String {
+        guard let id = activeProfileId else { return base + ".json" }
+        return "\(base)-\(id).json"
+    }
+
     init() {
-        authKey = Keychain.get("authKey")
-        email = UserDefaults.standard.string(forKey: "account.email")
+        profiles = ProfileStore.load()
+        migrateSingleAccount()
+        activeProfileId = ProfileStore.activeId.flatMap { id in profiles.contains { $0.id == id } ? id : nil }
+            ?? profiles.first?.id
+        loadActiveSession()
+        // Like the streaming apps: ask who's watching at launch once there's more than one profile.
+        choosingProfile = profiles.count > 1
+    }
+
+    /// Versions before profiles kept one account under "authKey"; that becomes the first profile.
+    private func migrateSingleAccount() {
+        guard profiles.isEmpty, let key = Keychain.get("authKey") else { return }
+        let mail = UserDefaults.standard.string(forKey: "account.email")
+        let profile = Profile(name: Profile.name(fromEmail: mail), avatar: 1, email: mail)
+        Keychain.set(key, for: profile.keychainAccount)
+        profiles = [profile]
+        ProfileStore.save(profiles)
+        ProfileStore.activeId = profile.id
+        Keychain.set(nil, for: "authKey")
+        UserDefaults.standard.removeObject(forKey: "account.email")
+    }
+
+    private func loadActiveSession() {
+        addons = []
+        setLibrary([])
+        errorMessage = nil
+        lastRefresh = nil
+        guard let profile = activeProfile else {
+            authKey = nil
+            email = nil
+            return
+        }
+        authKey = Keychain.get(profile.keychainAccount)
+        email = profile.email
         if authKey != nil { loadCache() }
+    }
+
+    /// Switches to a profile from the "Who's watching?" screen.
+    func select(_ profile: Profile) {
+        guard profiles.contains(profile) else { return }
+        if profile.id != activeProfileId {
+            activeProfileId = profile.id
+            ProfileStore.activeId = profile.id
+            loadActiveSession()
+        }
+        choosingProfile = false
+        Task { await refresh() }
+    }
+
+    /// Adds a profile and shows its Stremio sign-in.
+    func addProfile(name: String, avatar: Int) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let profile = Profile(name: trimmed.isEmpty ? "Profile \(profiles.count + 1)" : trimmed, avatar: avatar)
+        profiles.append(profile)
+        ProfileStore.save(profiles)
+        activeProfileId = profile.id
+        loadActiveSession()
+        choosingProfile = false
+    }
+
+    /// Backs out of signing in a newly added profile.
+    func cancelAddingProfile() {
+        guard let profile = activeProfile, authKey == nil else { return }
+        profiles.removeAll { $0.id == profile.id }
+        ProfileStore.save(profiles)
+        activeProfileId = ProfileStore.activeId.flatMap { id in profiles.contains { $0.id == id } ? id : nil }
+            ?? profiles.first?.id
+        loadActiveSession()
+        choosingProfile = !profiles.isEmpty
+    }
+
+    func updateProfile(_ id: String, name: String, avatar: Int) {
+        guard let i = profiles.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { profiles[i].name = trimmed }
+        profiles[i].avatar = avatar
+        ProfileStore.save(profiles)
+    }
+
+    /// Removes a profile from this device and signs its Stremio session out.
+    func deleteProfile(_ id: String) {
+        guard let profile = profiles.first(where: { $0.id == id }) else { return }
+        if let key = Keychain.get(profile.keychainAccount) {
+            Task.detached { await StremioAPI.logout(authKey: key) }
+        }
+        Keychain.set(nil, for: profile.keychainAccount)
+        DiskCache.remove("addons-\(id).json")
+        DiskCache.remove("library-\(id).json")
+        profiles.removeAll { $0.id == id }
+        ProfileStore.save(profiles)
+        if activeProfileId == id {
+            activeProfileId = profiles.first?.id
+            ProfileStore.activeId = activeProfileId
+            loadActiveSession()
+            choosingProfile = profiles.count > 1
+        }
     }
 
     // MARK: Session
@@ -43,31 +154,45 @@ final class AppModel {
     }
 
     private func finishSignIn(_ account: StremioAPI.Account) async {
+        // Signing in with no profiles yet creates the first one, named from the account.
+        if activeProfile == nil {
+            let profile = Profile(name: Profile.name(fromEmail: account.email), avatar: profiles.count + 1)
+            profiles.append(profile)
+            activeProfileId = profile.id
+            ProfileStore.activeId = profile.id
+        }
+        guard let i = profiles.firstIndex(where: { $0.id == activeProfileId }) else { return }
+        profiles[i].email = account.email
+        ProfileStore.save(profiles)
+        ProfileStore.activeId = activeProfileId
+        Keychain.set(account.authKey, for: profiles[i].keychainAccount)
         authKey = account.authKey
         email = account.email
-        Keychain.set(account.authKey, for: "authKey")
-        UserDefaults.standard.set(account.email, forKey: "account.email")
+        choosingProfile = false
         await refresh()
     }
 
+    /// Signs this profile out of Stremio and removes it from the device.
     func signOut() {
-        if let key = authKey { Task.detached { await StremioAPI.logout(authKey: key) } }
+        guard let id = activeProfileId else { return }
+        deleteProfile(id)
+    }
+
+    /// Keeps the profile but asks it to sign in again (an expired Stremio session).
+    private func endSession() {
+        if let profile = activeProfile { Keychain.set(nil, for: profile.keychainAccount) }
         authKey = nil
-        email = nil
         addons = []
         setLibrary([])
-        Keychain.set(nil, for: "authKey")
-        UserDefaults.standard.removeObject(forKey: "account.email")
-        DiskCache.clear()
     }
 
     // MARK: Loading
 
     private func loadCache() {
-        if let data = DiskCache.read("addons.json") {
+        if let data = DiskCache.read(cacheName("addons")) {
             addons = StremioAPI.decodeAddons(data)
         }
-        if let data = DiskCache.read("library.json"),
+        if let data = DiskCache.read(cacheName("library")),
            let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
             setLibrary(items.compactMap(LibraryEntry.init))
         }
@@ -83,6 +208,7 @@ final class AppModel {
 
     func refresh() async {
         guard let key = authKey, !isRefreshing else { return }
+        let profileId = activeProfileId
         lastRefresh = Date()
         isRefreshing = true
         defer { isRefreshing = false }
@@ -90,15 +216,18 @@ final class AppModel {
             async let addonsCall = StremioAPI.addonCollection(authKey: key)
             async let libraryCall = StremioAPI.libraryItems(authKey: key)
             let (collection, items) = try await (addonsCall, libraryCall)
+            // The profile may have been switched while this was loading.
+            guard activeProfileId == profileId else { return }
             addons = collection.addons
             setLibrary(items.compactMap(LibraryEntry.init))
-            DiskCache.write(collection.raw, name: "addons.json")
+            DiskCache.write(collection.raw, name: cacheName("addons"))
             if let data = try? JSONSerialization.data(withJSONObject: items) {
-                DiskCache.write(data, name: "library.json")
+                DiskCache.write(data, name: cacheName("library"))
             }
             errorMessage = nil
         } catch let error as StremioError where error.isSessionExpired {
-            signOut()
+            guard activeProfileId == profileId else { return }
+            endSession()
             errorMessage = "Your Stremio session ended. Sign in again."
         } catch {
             if addons.isEmpty { errorMessage = error.localizedDescription }
@@ -106,10 +235,12 @@ final class AppModel {
     }
 
     func refreshLibrary() async {
-        guard let key = authKey, let items = try? await StremioAPI.libraryItems(authKey: key) else { return }
+        let profileId = activeProfileId
+        guard let key = authKey, let items = try? await StremioAPI.libraryItems(authKey: key),
+              activeProfileId == profileId else { return }
         setLibrary(items.compactMap(LibraryEntry.init))
         if let data = try? JSONSerialization.data(withJSONObject: items) {
-            DiskCache.write(data, name: "library.json")
+            DiskCache.write(data, name: cacheName("library"))
         }
     }
 
@@ -136,7 +267,9 @@ final class AppModel {
 
     // MARK: Writing to the library
 
-    private func replaceLocal(_ raw: [String: Any]) {
+    /// Puts a written entry into the shown library, unless it belongs to a profile that's no longer active.
+    private func replaceLocal(_ raw: [String: Any], profileId: String? = nil) {
+        if let profileId, profileId != activeProfileId { return }
         guard let entry = LibraryEntry(raw) else { return }
         var entries = library
         if let i = entries.firstIndex(where: { $0.id == entry.id }) {
@@ -148,12 +281,13 @@ final class AppModel {
     }
 
     /// Runs library writes one after another so a periodic save and a close never race.
-    private func enqueue(_ work: @escaping @MainActor (String) async throws -> Void) {
+    private func enqueue(_ work: @escaping @MainActor (_ key: String, _ profileId: String?) async throws -> Void) {
         guard let key = authKey else { return }
+        let profileId = activeProfileId
         let previous = syncChain
         syncChain = Task { @MainActor in
             await previous?.value
-            do { try await work(key) } catch { /* best effort; next save retries */ }
+            do { try await work(key, profileId) } catch { /* best effort; next save retries */ }
         }
     }
 
@@ -170,38 +304,38 @@ final class AppModel {
         let base = entry(for: seed.id)?.raw
             ?? LibraryEntry.newRaw(id: seed.id, type: seed.type, name: seed.name, poster: seed.poster)
         replaceLocal(ProgressRules.setInLibrary(base, adding))
-        enqueue { [weak self] key in
+        enqueue { [weak self] key, profileId in
             guard let self else { return }
             let latest = try await self.latestRaw(key: key, seed: seed)
             let updated = ProgressRules.setInLibrary(latest, adding)
             try await StremioAPI.putLibraryItems(authKey: key, [updated])
-            self.replaceLocal(updated)
+            self.replaceLocal(updated, profileId: profileId)
         }
     }
 
     func dismissFromContinueWatching(_ entry: LibraryEntry) {
         let updated = ProgressRules.dismissFromContinueWatching(entry.raw)
         replaceLocal(updated)
-        enqueue { [weak self] key in
+        enqueue { [weak self] key, profileId in
             guard let self else { return }
             let latest = try await self.latestRaw(key: key, seed: LibrarySeed(entry.asMeta))
             let fresh = ProgressRules.dismissFromContinueWatching(latest)
             try await StremioAPI.putLibraryItems(authKey: key, [fresh])
-            self.replaceLocal(fresh)
+            self.replaceLocal(fresh, profileId: profileId)
         }
     }
 
     func saveProgress(seed: LibrarySeed, videoId: String, positionMs: UInt64, durationMs: UInt64,
                       watchedMs: UInt64, closing: Bool, nextVideoId: String?) {
         guard UserDefaults.standard.bool(forKey: Pref.syncProgress) else { return }
-        enqueue { [weak self] key in
+        enqueue { [weak self] key, profileId in
             guard let self else { return }
             let latest = try await self.latestRaw(key: key, seed: seed)
             let updated = ProgressRules.apply(to: latest, videoId: videoId, positionMs: positionMs,
                                               durationMs: durationMs, watchedMs: watchedMs,
                                               closing: closing, nextVideoId: nextVideoId)
             try await StremioAPI.putLibraryItems(authKey: key, [updated])
-            self.replaceLocal(updated)
+            self.replaceLocal(updated, profileId: profileId)
         }
     }
 

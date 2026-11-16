@@ -28,14 +28,21 @@ struct TVRootView: View {
 
     var body: some View {
         Group {
-            if model.isSignedIn {
+            if model.choosingProfile {
+                TVProfilePickerView()
+            } else if model.isSignedIn {
                 TVTabs()
+                    .id(model.activeProfileId)
                     .task { await model.refresh() }
             } else {
                 TVSignInView()
+                    .overlay(alignment: .top) {
+                        if model.activeProfile != nil { TVProfileSignInHeader().padding(.top, 20) }
+                    }
             }
         }
         .animation(.default, value: model.isSignedIn)
+        .animation(.default, value: model.choosingProfile)
         .onChange(of: scenePhase) { _, phase in
             // Pick up changes made in Stremio on other devices when coming back to the app.
             if phase == .active && model.isSignedIn {

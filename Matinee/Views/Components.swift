@@ -35,6 +35,8 @@ struct TopBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Search")
+
+            ProfileButton(size: 40)
         }
         .padding(.horizontal, sizing.hPad)
         .padding(.top, 4)
