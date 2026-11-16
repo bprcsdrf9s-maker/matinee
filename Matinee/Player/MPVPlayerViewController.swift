@@ -387,7 +387,7 @@ struct MPVControlsView: View {
             Text("The link may have expired or the addon's server may be down. Try another stream.")
                 .font(.subheadline).opacity(0.75).multilineTextAlignment(.center)
             HStack(spacing: 12) {
-                Button("Close", action: onClose).buttonStyle(.borderedProminent).foregroundStyle(.black)
+                Button("Close", action: onClose).buttonStyle(.borderedProminent).foregroundStyle(Theme.onAccent)
                 if canHandOff {
                     Button("Open in Infuse") { onOpenIn(.infuse) }.buttonStyle(.bordered)
                 }

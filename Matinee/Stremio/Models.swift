@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 // MARK: - Lenient decoding helpers
 
@@ -197,14 +198,24 @@ struct MetaItem: Decodable, Identifiable, Hashable {
         defaultVideoId = ((try? c.decodeIfPresent(BehaviorHints.self, forKey: .behaviorHints)) ?? nil)?.defaultVideoId
     }
 
-    init(id: String, type: String, name: String, poster: URL?, background: URL? = nil) {
+    init(id: String, type: String, name: String, poster: URL?, background: URL? = nil, posterShape: String? = nil) {
         self.id = id; self.type = type; self.name = name; self.poster = poster; self.background = background
-        logo = nil; posterShape = nil; description = nil; releaseInfo = nil; runtime = nil
+        self.posterShape = posterShape
+        logo = nil; description = nil; releaseInfo = nil; runtime = nil
         imdbRating = nil; genres = []; videos = []; defaultVideoId = nil
     }
 
     static func == (l: MetaItem, r: MetaItem) -> Bool { l.id == r.id && l.type == r.type }
     func hash(into hasher: inout Hasher) { hasher.combine(id); hasher.combine(type) }
+
+    /// Height ÷ width of this item's poster, from the addon's posterShape.
+    var posterAspect: CGFloat {
+        switch posterShape {
+        case "landscape": return 9.0 / 16.0
+        case "square": return 1
+        default: return 1.5
+        }
+    }
 
     /// Series and other multi-video items list their episodes in `videos`.
     var hasEpisodes: Bool { videos.count > 1 || (videos.count == 1 && videos[0].season != nil) }

@@ -38,24 +38,52 @@ struct RootView: View {
     }
 }
 
+/// Five tabs under a floating capsule tab bar. Each tab keeps its own navigation history,
+/// and a tab is only built the first time it's opened.
 struct MainTabs: View {
-    @State private var selection = "home"
+    @State private var selection: MainTab = .board
+    @State private var opened: Set<MainTab> = [.board]
+    @State private var paths: [MainTab: NavigationPath] = [:]
 
     var body: some View {
-        TabView(selection: $selection) {
-            Tab("Home", systemImage: "house.fill", value: "home") {
-                NavigationStack { HomeView().withMatineeDestinations() }
-            }
-            Tab("Library", systemImage: "books.vertical.fill", value: "library") {
-                NavigationStack { LibraryView().withMatineeDestinations() }
-            }
-            Tab("Settings", systemImage: "gearshape.fill", value: "settings") {
-                NavigationStack { SettingsView() }
-            }
-            Tab(value: "search", role: .search) {
-                NavigationStack { SearchView().withMatineeDestinations() }
+        ZStack {
+            ForEach(MainTab.allCases) { tab in
+                if opened.contains(tab) {
+                    NavigationStack(path: path(for: tab)) {
+                        root(tab).withMatineeDestinations()
+                    }
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        Color.clear.frame(height: Theme.tabBarClearance)
+                    }
+                    .opacity(selection == tab ? 1 : 0)
+                    .allowsHitTesting(selection == tab)
+                    .accessibilityHidden(selection != tab)
+                }
             }
         }
-        .tabViewStyle(.sidebarAdaptable)
+        .overlay(alignment: .bottom) {
+            FloatingTabBar(selection: $selection) { tab in
+                paths[tab] = NavigationPath()
+            }
+            .padding(.bottom, 2)
+        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .background(Theme.background.ignoresSafeArea())
+        .onChange(of: selection) { _, tab in opened.insert(tab) }
+    }
+
+    private func path(for tab: MainTab) -> Binding<NavigationPath> {
+        Binding(get: { paths[tab] ?? NavigationPath() }, set: { paths[tab] = $0 })
+    }
+
+    @ViewBuilder
+    private func root(_ tab: MainTab) -> some View {
+        switch tab {
+        case .board: HomeView()
+        case .discover: DiscoverView()
+        case .library: LibraryView()
+        case .addons: AddonsView()
+        case .settings: SettingsView()
+        }
     }
 }

@@ -9,6 +9,13 @@ final class AppModel {
     private(set) var email: String?
     private(set) var addons: [AddonDescriptor] = []
     private(set) var library: [LibraryEntry] = []
+    /// Same entries keyed by id, for quick lookups from every poster.
+    private(set) var libraryById: [String: LibraryEntry] = [:]
+
+    private func setLibrary(_ entries: [LibraryEntry]) {
+        library = entries
+        libraryById = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+    }
     private(set) var isRefreshing = false
     var errorMessage: String?
 
@@ -48,7 +55,7 @@ final class AppModel {
         authKey = nil
         email = nil
         addons = []
-        library = []
+        setLibrary([])
         Keychain.set(nil, for: "authKey")
         UserDefaults.standard.removeObject(forKey: "account.email")
         DiskCache.clear()
@@ -62,7 +69,7 @@ final class AppModel {
         }
         if let data = DiskCache.read("library.json"),
            let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-            library = items.compactMap(LibraryEntry.init)
+            setLibrary(items.compactMap(LibraryEntry.init))
         }
     }
 
@@ -75,7 +82,7 @@ final class AppModel {
             async let libraryCall = StremioAPI.libraryItems(authKey: key)
             let (collection, items) = try await (addonsCall, libraryCall)
             addons = collection.addons
-            library = items.compactMap(LibraryEntry.init)
+            setLibrary(items.compactMap(LibraryEntry.init))
             DiskCache.write(collection.raw, name: "addons.json")
             if let data = try? JSONSerialization.data(withJSONObject: items) {
                 DiskCache.write(data, name: "library.json")
@@ -91,7 +98,7 @@ final class AppModel {
 
     func refreshLibrary() async {
         guard let key = authKey, let items = try? await StremioAPI.libraryItems(authKey: key) else { return }
-        library = items.compactMap(LibraryEntry.init)
+        setLibrary(items.compactMap(LibraryEntry.init))
         if let data = try? JSONSerialization.data(withJSONObject: items) {
             DiskCache.write(data, name: "library.json")
         }
@@ -108,7 +115,7 @@ final class AppModel {
     }
 
     func entry(for id: String) -> LibraryEntry? {
-        library.first { $0.id == id }
+        libraryById[id]
     }
 
     /// Catalogs shown as rows on Home, in addon order.
@@ -122,11 +129,13 @@ final class AppModel {
 
     private func replaceLocal(_ raw: [String: Any]) {
         guard let entry = LibraryEntry(raw) else { return }
-        if let i = library.firstIndex(where: { $0.id == entry.id }) {
-            library[i] = entry
+        var entries = library
+        if let i = entries.firstIndex(where: { $0.id == entry.id }) {
+            entries[i] = entry
         } else {
-            library.append(entry)
+            entries.append(entry)
         }
+        setLibrary(entries)
     }
 
     /// Runs library writes one after another so a periodic save and a close never race.

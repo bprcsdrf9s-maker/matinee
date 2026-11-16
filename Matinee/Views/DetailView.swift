@@ -119,7 +119,7 @@ struct DetailView: View {
                     .padding(.vertical, 6)
             }
             .buttonStyle(.borderedProminent)
-            .foregroundStyle(.black)
+            .foregroundStyle(Theme.onAccent)
             .disabled(!loaded && preview.type == "series")
 
             Button {
@@ -188,7 +188,7 @@ struct DetailView: View {
                                 .font(.subheadline.weight(.semibold))
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 8)
-                                .foregroundStyle(season == s ? Color.black : Color.primary)
+                                .foregroundStyle(season == s ? Theme.onAccent : Color.primary)
                                 .background(season == s ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.white.opacity(0.1)),
                                             in: Capsule())
                         }

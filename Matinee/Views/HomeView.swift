@@ -38,125 +38,87 @@ final class HomeModel {
         }
         loading = false
     }
-
-    /// Featured title for the banner: the first item with wide artwork.
-    var hero: MetaItem? {
-        rows.first?.items.first(where: { $0.backdrop != nil }) ?? rows.first?.items.first
-    }
 }
 
+/// The Board: Continue Watching, then a row per addon catalog.
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.sizing) private var sizing
     @State private var home = HomeModel()
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 28) {
-                if let hero = home.hero {
-                    HeroBanner(meta: hero)
-                }
-
-                if !model.continueWatching.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        RowHeader(title: "Continue Watching").padding(.horizontal, sizing.hPad)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            LazyHStack(alignment: .top, spacing: 14) {
-                                ForEach(model.continueWatching) { entry in
-                                    NavigationLink(value: Route.meta(entry.asMeta, autoplayVideoId: entry.videoId ?? entry.id)) {
-                                        ContinueCard(entry: entry, width: sizing.landscapeWidth)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .contextMenu {
-                                        NavigationLink(value: Route.meta(entry.asMeta)) {
-                                            Label("Details", systemImage: "info.circle")
-                                        }
-                                        Button(role: .destructive) {
-                                            model.dismissFromContinueWatching(entry)
-                                        } label: {
-                                            Label("Remove from Continue Watching", systemImage: "eye.slash")
-                                        }
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, sizing.hPad)
+        VStack(spacing: 0) {
+            TopBar()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 22) {
+                    if !model.continueWatching.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            RowHeader(title: "Continue Watching").padding(.horizontal, sizing.hPad)
+                            continueRow
                         }
-                        .scrollClipDisabled()
                     }
-                }
 
-                ForEach(home.rows) { row in
-                    VStack(alignment: .leading, spacing: 12) {
-                        RowHeader(title: row.title,
-                                  destination: .catalog(addonUrl: row.addon.transportUrl, type: row.catalog.type,
-                                                        id: row.catalog.id, title: row.title))
-                            .padding(.horizontal, sizing.hPad)
-                        PosterRow(items: row.items)
+                    ForEach(home.rows) { row in
+                        VStack(alignment: .leading, spacing: 10) {
+                            RowHeader(title: row.title,
+                                      destination: .catalog(addonUrl: row.addon.transportUrl, type: row.catalog.type,
+                                                            id: row.catalog.id, title: row.title))
+                                .padding(.horizontal, sizing.hPad)
+                            PosterRow(items: row.items)
+                        }
                     }
-                }
 
-                if home.loading {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
-                } else if home.rows.isEmpty && model.continueWatching.isEmpty {
-                    if let error = model.errorMessage {
-                        EmptyStateView(symbol: "wifi.exclamationmark", title: "Couldn't load", message: error)
-                    } else if !model.addons.isEmpty {
-                        EmptyStateView(symbol: "square.stack.3d.up.slash", title: "No catalogs",
-                                       message: "None of your addons have catalogs. Add Cinemeta in Stremio to fill Home.")
+                    if home.loading {
+                        ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+                    } else if home.rows.isEmpty && model.continueWatching.isEmpty {
+                        if let error = model.errorMessage {
+                            EmptyStateView(symbol: "wifi.exclamationmark", title: "Couldn't load", message: error)
+                        } else if !model.addons.isEmpty {
+                            EmptyStateView(symbol: "square.stack.3d.up.slash", title: "No catalogs",
+                                           message: "None of your addons have catalogs. Add Cinemeta in Stremio to fill the Board.")
+                        }
                     }
                 }
+                .padding(.top, 6)
+                .padding(.bottom, 24)
             }
-            .padding(.bottom, 30)
+            .refreshable {
+                await model.refresh()
+                await home.load(model.boardCatalogs, force: true)
+            }
         }
         .background(Theme.background)
-        .navigationTitle("Home")
-        .toolbarTitleDisplayMode(.inlineLarge)
-        .refreshable {
-            await model.refresh()
-            await home.load(model.boardCatalogs, force: true)
-        }
+        .toolbar(.hidden, for: .navigationBar)
         .task(id: model.addons.map(\.transportUrl)) {
             await home.load(model.boardCatalogs)
         }
     }
-}
 
-struct HeroBanner: View {
-    let meta: MetaItem
-    @Environment(\.sizing) private var sizing
-
-    var body: some View {
-        NavigationLink(value: Route.meta(meta)) {
-            ZStack(alignment: .bottomLeading) {
-                RemoteImage(url: meta.backdrop ?? meta.poster, fallback: meta.poster)
-                    .frame(height: sizing.regular ? 380 : 240)
-                    .frame(maxWidth: .infinity)
-                    .clipped()
-                LinearGradient(colors: [.clear, Theme.background.opacity(0.6), Theme.background],
-                               startPoint: .top, endPoint: .bottom)
-                VStack(alignment: .leading, spacing: 8) {
-                    if let logo = meta.logo {
-                        RemoteImage(url: logo, contentMode: .fit)
-                            .frame(maxWidth: sizing.regular ? 360 : 220, maxHeight: sizing.regular ? 110 : 70, alignment: .leading)
-                    } else {
-                        Text(meta.name).font(.largeTitle.weight(.heavy)).lineLimit(2)
+    private var continueRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(alignment: .top, spacing: 10) {
+                ForEach(model.continueWatching) { entry in
+                    NavigationLink(value: Route.meta(entry.asMeta, autoplayVideoId: entry.videoId ?? entry.id)) {
+                        let meta = entry.asMeta
+                        PosterCard(meta: meta,
+                                   width: meta.posterShape == "landscape" ? sizing.landscapeWidth : sizing.posterWidth,
+                                   progress: entry.progress > 0 ? entry.progress : nil)
                     }
-                    HStack(spacing: 8) {
-                        Label("Featured", systemImage: "sparkles").font(.caption.weight(.bold)).foregroundStyle(Theme.accent)
-                        if let year = meta.year { Text(year).font(.caption).foregroundStyle(.secondary) }
-                        if let rating = meta.imdbRating {
-                            Label(rating, systemImage: "star.fill").font(.caption).foregroundStyle(.secondary)
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        NavigationLink(value: Route.meta(entry.asMeta)) {
+                            Label("Details", systemImage: "info.circle")
+                        }
+                        Button(role: .destructive) {
+                            model.dismissFromContinueWatching(entry)
+                        } label: {
+                            Label("Remove from Continue Watching", systemImage: "eye.slash")
                         }
                     }
-                    if let d = meta.description {
-                        Text(d).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                            .frame(maxWidth: 560, alignment: .leading)
-                    }
                 }
-                .padding(.horizontal, sizing.hPad)
-                .padding(.bottom, 10)
             }
+            .padding(.horizontal, sizing.hPad)
         }
-        .buttonStyle(.plain)
+        .scrollClipDisabled()
     }
 }

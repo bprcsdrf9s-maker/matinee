@@ -17,6 +17,9 @@ struct LibraryEntry: Identifiable {
     let timeOffset: Double
     let duration: Double
     let videoId: String?
+    let posterShape: String?
+    /// Stremio marks a title watched once 70% of a video has played, or when the user marks it.
+    let isWatched: Bool
 
     init?(_ raw: [String: Any]) {
         guard let id = raw["_id"] as? String else { return nil }
@@ -34,6 +37,10 @@ struct LibraryEntry: Identifiable {
         duration = (state["duration"] as? NSNumber)?.doubleValue ?? 0
         let vid = state["video_id"] as? String
         videoId = (vid?.isEmpty ?? true) ? nil : vid
+        posterShape = raw["posterShape"] as? String
+        let times = (state["timesWatched"] as? NSNumber)?.intValue ?? 0
+        let flagged = (state["flaggedWatched"] as? NSNumber)?.intValue ?? 0
+        isWatched = times > 0 || flagged > 0
     }
 
     /// stremio-core LibraryItem::is_in_library-style check: saved by the user.
@@ -59,7 +66,7 @@ struct LibraryEntry: Identifiable {
 
     var resumeSeconds: Double { timeOffset / 1000 }
 
-    var asMeta: MetaItem { MetaItem(id: id, type: type, name: name, poster: poster) }
+    var asMeta: MetaItem { MetaItem(id: id, type: type, name: name, poster: poster, posterShape: posterShape) }
 
     // MARK: Building writes
 

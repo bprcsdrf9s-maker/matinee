@@ -16,7 +16,7 @@ struct RemoteImage: View {
                 RemoteImage(url: fallback, contentMode: contentMode, placeholderText: placeholderText)
             default:
                 ZStack {
-                    LinearGradient(colors: [Color(white: 0.18), Color(white: 0.1)], startPoint: .top, endPoint: .bottom)
+                    LinearGradient(colors: [Color(white: 0.16), Color(white: 0.1)], startPoint: .top, endPoint: .bottom)
                     if let placeholderText {
                         Text(placeholderText)
                             .font(.caption.weight(.semibold))
@@ -30,31 +30,91 @@ struct RemoteImage: View {
     }
 }
 
-struct PosterCard: View {
-    let meta: MetaItem
-    let width: CGFloat
-    var showTitle = true
+// MARK: - Top bar
+
+/// Logo plus a full-width search pill, shown at the top of Board, Discover and Library.
+struct TopBar: View {
+    @Environment(\.sizing) private var sizing
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            RemoteImage(url: meta.poster, placeholderText: meta.name)
-                .frame(width: width, height: width * 1.5)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                        .strokeBorder(.white.opacity(0.06))
-                )
-            if showTitle {
-                Text(meta.name)
-                    .font(.footnote.weight(.medium))
-                    .lineLimit(1)
-                    .frame(width: width, alignment: .leading)
-                if let year = meta.year {
-                    Text(year).font(.caption2).foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(Theme.pill)
+                Image(systemName: "play.fill")
+                    .font(.system(size: 15, weight: .black))
+                    .foregroundStyle(
+                        LinearGradient(colors: [Theme.accent, Color(red: 0.36, green: 0.27, blue: 0.95)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    .offset(x: 1.5)
+            }
+            .frame(width: 40, height: 40)
+            .accessibilityHidden(true)
+
+            NavigationLink(value: Route.search) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                    Text("Search")
+                    Spacer(minLength: 0)
+                }
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .frame(height: 42)
+                .background(Theme.pill, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Search")
+        }
+        .padding(.horizontal, sizing.hPad)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
+    }
+}
+
+// MARK: - Posters
+
+/// A poster with no caption, like Stremio's boards. Shows a check when the title is watched.
+/// With no width it fills the space it's given (grid cells) at the poster's own aspect ratio.
+struct PosterCard: View {
+    let meta: MetaItem
+    var width: CGFloat? = nil
+    var progress: Double? = nil
+
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let watched = model.entry(for: meta.id)?.isWatched == true
+        Color.clear
+            .aspectRatio(1 / meta.posterAspect, contentMode: .fit)
+            .frame(width: width)
+            .overlay { RemoteImage(url: meta.poster, placeholderText: meta.name) }
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(alignment: .topLeading) {
+                if watched { WatchedBadge().padding(6) }
+            }
+            .overlay(alignment: .bottom) {
+                if let progress, progress > 0 {
+                    ProgressLine(value: progress)
+                        .padding(.horizontal, 6)
+                        .padding(.bottom, 6)
                 }
             }
-        }
-        .contentShape(Rectangle())
+            .contentShape(Rectangle())
+            .accessibilityElement()
+            .accessibilityLabel(meta.name)
+    }
+}
+
+struct WatchedBadge: View {
+    var body: some View {
+        Image(systemName: "checkmark")
+            .font(.system(size: 10, weight: .heavy))
+            .foregroundStyle(Theme.onAccent)
+            .frame(width: 20, height: 20)
+            .background(Theme.accent, in: Circle())
+            .overlay(Circle().strokeBorder(.white.opacity(0.85), lineWidth: 1.2))
+            .accessibilityLabel("Watched")
     }
 }
 
@@ -64,7 +124,7 @@ struct ProgressLine: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.25))
+                Capsule().fill(.white.opacity(0.3))
                 Capsule().fill(Theme.accent).frame(width: max(4, geo.size.width * value))
             }
         }
@@ -72,72 +132,35 @@ struct ProgressLine: View {
     }
 }
 
-struct ContinueCard: View {
-    let entry: LibraryEntry
-    let width: CGFloat
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ZStack(alignment: .bottomLeading) {
-                RemoteImage(url: backdrop, placeholderText: entry.name, fallback: entry.poster)
-                    .frame(width: width, height: width * 9 / 16)
-                    .clipped()
-                    .overlay(alignment: .center) {
-                        Image(systemName: "play.fill")
-                            .font(.title2)
-                            .padding(14)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-                LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .center, endPoint: .bottom)
-                if entry.progress > 0 {
-                    ProgressLine(value: entry.progress)
-                        .padding(.horizontal, 10)
-                        .padding(.bottom, 10)
-                }
-            }
-            .frame(width: width, height: width * 9 / 16)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            .frame(width: width, alignment: .leading)
-        }
-        .contentShape(Rectangle())
-    }
-
-    private var backdrop: URL? { entry.asMeta.backdrop ?? entry.poster }
-
-    private var subtitle: String {
-        var parts: [String] = []
-        if let ep = entry.episodeLabel { parts.append(ep) }
-        if entry.duration > 0 && entry.timeOffset > 1 {
-            let left = max(0, (entry.duration - entry.timeOffset) / 1000)
-            parts.append("\(Int(left / 60)) min left")
-        } else if entry.timeOffset == 1 {
-            parts.append("Up next")
-        }
-        return parts.isEmpty ? (entry.type == "series" ? "Series" : "Movie") : parts.joined(separator: " · ")
-    }
+/// Grid columns for a set of posters: 3 across on iPhone (2 for wide channel art), more on iPad.
+func posterColumns(for items: [MetaItem], sizing: Sizing) -> [GridItem] {
+    let landscape = !items.isEmpty && items.prefix(6).allSatisfy { $0.posterShape == "landscape" }
+    let count = landscape ? max(2, sizing.gridColumns - 1) : sizing.gridColumns
+    return Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: count)
 }
+
+// MARK: - Rows
 
 struct RowHeader: View {
     let title: String
     var destination: Route? = nil
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title).font(.title3.weight(.bold))
-            Spacer()
+        HStack(alignment: .center) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+                .lineLimit(1)
+            Spacer(minLength: 8)
             if let destination {
                 NavigationLink(value: destination) {
-                    HStack(spacing: 3) {
-                        Text("See All")
-                        Image(systemName: "chevron.right").font(.caption.weight(.bold))
-                    }
-                    .font(.subheadline.weight(.medium))
+                    Text("See All")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Theme.pill, in: Capsule())
                 }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -149,10 +172,11 @@ struct PosterRow: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(alignment: .top, spacing: 12) {
+            LazyHStack(alignment: .top, spacing: 10) {
                 ForEach(items) { meta in
                     NavigationLink(value: Route.meta(meta)) {
-                        PosterCard(meta: meta, width: sizing.posterWidth)
+                        PosterCard(meta: meta,
+                                   width: meta.posterShape == "landscape" ? sizing.landscapeWidth : sizing.posterWidth)
                     }
                     .buttonStyle(.plain)
                 }
@@ -162,6 +186,169 @@ struct PosterRow: View {
         .scrollClipDisabled()
     }
 }
+
+// MARK: - Dropdown pills
+
+/// A rounded dropdown pill like the Discover filters; tapping opens a sheet of options.
+struct FilterPill: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 2)
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .font(.subheadline)
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 12)
+            .frame(height: 36)
+            .frame(maxWidth: .infinity)
+            .background(Theme.pill, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Bottom sheet listing options with a check on the current one.
+struct OptionSheet: View {
+    let title: String
+    let options: [String]
+    let selected: String
+    let onSelect: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+                .padding(.horizontal, 16)
+                .padding(.top, 24)
+                .padding(.bottom, 12)
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(options, id: \.self) { option in
+                        Button {
+                            onSelect(option)
+                            dismiss()
+                        } label: {
+                            HStack {
+                                Text(option)
+                                    .foregroundStyle(option == selected ? Theme.accent : .primary)
+                                Spacer()
+                                if option == selected {
+                                    Image(systemName: "checkmark").foregroundStyle(Theme.accent)
+                                }
+                            }
+                            .font(.body)
+                            .padding(.horizontal, 16)
+                            .frame(height: 50)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Divider().overlay(Color.white.opacity(0.06))
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Color(white: 0.11))
+    }
+}
+
+// MARK: - Floating tab bar
+
+enum MainTab: String, CaseIterable, Identifiable {
+    case board, discover, library, addons, settings
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .board: return "Board"
+        case .discover: return "Discover"
+        case .library: return "Library"
+        case .addons: return "Addons"
+        case .settings: return "Settings"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .board: return "house"
+        case .discover: return "safari"
+        case .library: return "square.stack"
+        case .addons: return "puzzlepiece.extension"
+        case .settings: return "gearshape"
+        }
+    }
+
+    var selectedSymbol: String {
+        switch self {
+        case .board: return "house.fill"
+        case .discover: return "safari.fill"
+        case .library: return "square.stack.fill"
+        case .addons: return "puzzlepiece.extension.fill"
+        case .settings: return "gearshape.fill"
+        }
+    }
+}
+
+struct FloatingTabBar: View {
+    @Binding var selection: MainTab
+    /// Tapping the current tab again pops it back to its first screen.
+    var onReselect: (MainTab) -> Void = { _ in }
+    @Namespace private var highlight
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(MainTab.allCases) { tab in
+                let selected = tab == selection
+                Button {
+                    if selected { onReselect(tab) }
+                    withAnimation(.snappy(duration: 0.25)) { selection = tab }
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: selected ? tab.selectedSymbol : tab.symbol)
+                            .font(.system(size: 19, weight: .medium))
+                            .frame(height: 22)
+                        Text(tab.title)
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundStyle(selected ? Theme.accent : Color.primary.opacity(0.9))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 54)
+                    .background {
+                        if selected {
+                            Capsule()
+                                .fill(Color.white.opacity(0.1))
+                                .matchedGeometryEffect(id: "tab", in: highlight)
+                        }
+                    }
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(5)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.08)))
+        .shadow(color: .black.opacity(0.35), radius: 18, y: 6)
+        .frame(maxWidth: 440)
+        .padding(.horizontal, 20)
+    }
+}
+
+// MARK: - Misc
 
 struct EmptyStateView: View {
     let symbol: String
@@ -186,7 +373,7 @@ struct Chip: View {
             .font(.caption2.weight(.bold))
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .foregroundStyle(highlighted ? Color.black : Color.primary)
+            .foregroundStyle(highlighted ? Theme.onAccent : Color.primary)
             .background(highlighted ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.white.opacity(0.12)),
                         in: RoundedRectangle(cornerRadius: 5, style: .continuous))
     }

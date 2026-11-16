@@ -13,7 +13,7 @@ struct SignInView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(red: 0.16, green: 0.09, blue: 0.04), Theme.background],
+            LinearGradient(colors: [Color(red: 0.13, green: 0.09, blue: 0.27), Theme.background],
                            startPoint: .top, endPoint: .center)
                 .ignoresSafeArea()
 
@@ -58,13 +58,13 @@ struct SignInView: View {
                             Task { await signIn() }
                         } label: {
                             Group {
-                                if working { ProgressView().tint(.black) } else { Text("Sign In").font(.headline) }
+                                if working { ProgressView().tint(Theme.onAccent) } else { Text("Sign In").font(.headline) }
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 6)
                         }
                         .buttonStyle(.borderedProminent)
-                        .foregroundStyle(.black)
+                        .foregroundStyle(Theme.onAccent)
                         .controlSize(.large)
                         .disabled(working || email.isEmpty || password.isEmpty)
                     }
@@ -219,31 +219,74 @@ struct SettingsView: View {
                 Text("Keeps Continue Watching in sync with Stremio on your other devices.")
             }
 
-            Section("Addons") {
-                ForEach(model.addons) { addon in
-                    HStack(spacing: 12) {
-                        RemoteImage(url: addon.manifest.logo, contentMode: .fit)
-                            .frame(width: 32, height: 32)
-                            .clipShape(RoundedRectangle(cornerRadius: 7))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(addon.manifest.name).font(.subheadline.weight(.semibold))
-                            if let d = addon.manifest.description {
-                                Text(d).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                            }
-                        }
-                    }
-                }
-                Text("Add or remove addons in any Stremio app, then pull down on Home to reload.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
-
             Section {
                 LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0")
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
         .navigationTitle("Settings")
         .confirmationDialog("Sign out of Stremio?", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign Out", role: .destructive) { model.signOut() }
         }
+    }
+}
+
+/// Installed addons, in the order Stremio uses them.
+struct AddonsView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(model.addons) { addon in
+                    HStack(spacing: 14) {
+                        RemoteImage(url: addon.manifest.logo, contentMode: .fit, placeholderText: nil)
+                            .frame(width: 44, height: 44)
+                            .background(Theme.pill)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(addon.manifest.name).font(.headline)
+                                if !addon.manifest.version.isEmpty {
+                                    Text("v\(addon.manifest.version)").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            if let d = addon.manifest.description, !d.isEmpty {
+                                Text(d).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                            }
+                            Text(capabilities(addon))
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(Theme.accent)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            } footer: {
+                Text("Install or remove addons in any Stremio app or at web.stremio.com, then pull down here to reload.")
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
+        .navigationTitle("Addons")
+        .refreshable { await model.refresh() }
+        .overlay {
+            if model.addons.isEmpty {
+                if model.isRefreshing { ProgressView() } else {
+                    EmptyStateView(symbol: "puzzlepiece.extension", title: "No addons",
+                                   message: "Your Stremio account has no addons yet.")
+                }
+            }
+        }
+    }
+
+    private func capabilities(_ addon: AddonDescriptor) -> String {
+        let names = addon.manifest.resources.map(\.name)
+        var parts: [String] = []
+        if !addon.manifest.catalogs.isEmpty { parts.append("Catalogs") }
+        if names.contains("meta") { parts.append("Details") }
+        if names.contains("stream") { parts.append("Streams") }
+        if names.contains("subtitles") { parts.append("Subtitles") }
+        return parts.joined(separator: " · ")
     }
 }

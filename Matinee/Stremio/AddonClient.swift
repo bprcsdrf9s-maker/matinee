@@ -135,17 +135,14 @@ enum AddonClient {
 }
 
 extension ManifestCatalog {
-    /// "Popular · Movies", the way Stremio titles its board rows.
+    /// Stremio's row title: "Trending Movies - Movie".
     func title(addonName: String) -> String {
-        let typeName: String
-        switch type {
-        case "movie": typeName = "Movies"
-        case "series": typeName = "Series"
-        case "channel": typeName = "Channels"
-        case "tv": typeName = "TV"
-        default: typeName = type.capitalized
-        }
         let base = (name?.isEmpty == false ? name! : addonName)
-        return "\(base) · \(typeName)"
+        return "\(base) – \(Format.typeName(type))"
+    }
+
+    /// Name for the Discover catalog picker.
+    func pickerName(addonName: String) -> String {
+        name?.isEmpty == false ? name! : addonName
     }
 }
