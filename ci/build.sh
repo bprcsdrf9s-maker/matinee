@@ -13,6 +13,11 @@ fi
 xcodebuild -version
 
 command -v xcodegen >/dev/null || brew install xcodegen
+
+# The Apple TV icon and Top Shelf art are drawn here rather than stored in the repo.
+if [ ! -f "MatineeTV/Assets.xcassets/App Icon & Top Shelf Image.brandassets/Contents.json" ]; then
+  python3 -m venv /tmp/iconenv && /tmp/iconenv/bin/pip install -q pillow     && /tmp/iconenv/bin/python ci/make-tv-icons.py MatineeTV/Assets.xcassets     || echo "::warning::Couldn't draw the Apple TV icons"
+fi
 xcodegen generate
 
 rm -rf build Payload Matinee.ipa
@@ -52,3 +57,41 @@ cp -R "$APP" Payload/
 zip -qry Matinee.ipa Payload
 rm -rf Payload
 echo "Built Matinee.ipa ($VERSION, build $BUILD_NUMBER), $(du -h Matinee.ipa | cut -f1)"
+
+# Apple TV: compile to check it builds, then package a ready-to-open Xcode project for installing
+# from a Mac (Xcode signs it with your Apple ID). A failure here doesn't stop the iPhone release.
+rm -f Matinee-AppleTV-Xcode.zip tvos-errors.txt
+set +e
+xcodebuild \
+  -project Matinee.xcodeproj \
+  -scheme MatineeTV \
+  -configuration Release \
+  -sdk appletvos \
+  -destination 'generic/platform=tvOS' \
+  -derivedDataPath build \
+  MARKETING_VERSION="$VERSION" \
+  CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+  build > build-tvos.log 2>&1
+tv_status=$?
+set -e
+
+if [ $tv_status -ne 0 ]; then
+  echo "Apple TV build failed. Errors:"
+  grep -E "error:|fatal error" build-tvos.log | sed "s|$PWD/||" | sort -u | head -80 | tee tvos-errors.txt
+  [ -s tvos-errors.txt ] || tail -60 build-tvos.log > tvos-errors.txt
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    { echo "## Apple TV build failed"; echo '```'; cat tvos-errors.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+  fi
+else
+  # Bake this build's version into the project so Xcode on the Mac shows the same number.
+  sed -i '' "s/MARKETING_VERSION: \"1.0\"/MARKETING_VERSION: \"$VERSION\"/; s/CURRENT_PROJECT_VERSION: \"1\"/CURRENT_PROJECT_VERSION: \"$BUILD_NUMBER\"/" project.yml
+  xcodegen generate
+  rm -rf pkg && mkdir -p pkg/Matinee
+  cp -R project.yml Matinee.xcodeproj Matinee MatineeTV pkg/Matinee/
+  cp ci/AppleTV-README.txt pkg/Matinee/README-Apple-TV.txt
+  (cd pkg && zip -qry ../Matinee-AppleTV-Xcode.zip Matinee)
+  rm -rf pkg
+  git checkout -- project.yml 2>/dev/null || true
+  echo "Built the Apple TV app and packaged Matinee-AppleTV-Xcode.zip ($(du -h Matinee-AppleTV-Xcode.zip | cut -f1))"
+fi

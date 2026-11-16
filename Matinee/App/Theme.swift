@@ -20,6 +20,7 @@ enum Route: Hashable {
     case search
 }
 
+#if os(iOS)
 extension View {
     func withMatineeDestinations() -> some View {
         navigationDestination(for: Route.self) { route in
@@ -34,7 +35,9 @@ extension View {
         }
     }
 }
+#endif
 
+#if os(iOS)
 /// Poster widths that suit phone and tablet.
 struct Sizing {
     let regular: Bool
@@ -47,6 +50,7 @@ struct Sizing {
 extension EnvironmentValues {
     var sizing: Sizing { Sizing(regular: horizontalSizeClass == .regular) }
 }
+#endif
 
 enum Format {
     static func clock(_ seconds: Double) -> String {

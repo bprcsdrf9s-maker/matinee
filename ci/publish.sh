@@ -48,10 +48,26 @@ cat > source.json <<JSON
 }
 JSON
 
-gh release create "$TAG" Matinee.ipa source.json icon.png \
+NOTES="Build ${BUILD_NUMBER}. Install through AltStore or SideStore with the source link: https://github.com/${REPO}/releases/latest/download/source.json"
+ASSETS=(Matinee.ipa source.json icon.png)
+if [ -f Matinee-AppleTV-Xcode.zip ]; then
+  ASSETS+=(Matinee-AppleTV-Xcode.zip)
+  NOTES="${NOTES}
+
+Apple TV: download Matinee-AppleTV-Xcode.zip, open Matinee.xcodeproj on a Mac and run the MatineeTV scheme on your Apple TV (steps in README-Apple-TV.txt)."
+elif [ -f tvos-errors.txt ]; then
+  NOTES="${NOTES}
+
+Apple TV build failed:
+\`\`\`
+$(head -60 tvos-errors.txt)
+\`\`\`"
+fi
+
+gh release create "$TAG" "${ASSETS[@]}" \
   --repo "$REPO" \
   --title "Matinee ${VERSION}" \
-  --notes "Build ${BUILD_NUMBER}. Install through AltStore or SideStore with the source link: https://github.com/${REPO}/releases/latest/download/source.json" \
+  --notes "$NOTES" \
   --latest
 
 {

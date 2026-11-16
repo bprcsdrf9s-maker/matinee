@@ -153,6 +153,11 @@ final class PlayerPresenter {
     // MARK: mpv
 
     private func presentMPV(_ session: PlaybackSession, startAt: Double, notice: String?) {
+        #if os(tvOS)
+        // Ask for every channel HDMI offers, so mpv can send 5.1/7.1 to the TV or receiver.
+        let audio = AVAudioSession.sharedInstance()
+        try? audio.setPreferredOutputNumberOfChannels(audio.maximumOutputNumberOfChannels)
+        #endif
         let vc = MPVPlayerViewController(session: session, startAt: startAt, notice: notice)
         vc.onClose = { [weak self] in self?.end(session) }
         present(vc)
@@ -212,6 +217,7 @@ final class ApplePlayerViewController: AVPlayerViewController, AVPlayerViewContr
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    #if os(iOS)
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
         UIDevice.current.userInterfaceIdiom == .phone ? .allButUpsideDown : .all
     }
@@ -219,13 +225,16 @@ final class ApplePlayerViewController: AVPlayerViewController, AVPlayerViewContr
     override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
         UIDevice.current.userInterfaceIdiom == .phone ? .landscapeRight : super.preferredInterfaceOrientationForPresentation
     }
+    #endif
 
     override func viewDidLoad() {
         super.viewDidLoad()
         delegate = self
         allowsPictureInPicturePlayback = true
+        #if os(iOS)
         canStartPictureInPictureAutomaticallyFromInline = true
         updatesNowPlayingInfoCenter = true
+        #endif
 
         let request = session.request
         var options: [String: Any] = [:]
@@ -235,7 +244,9 @@ final class ApplePlayerViewController: AVPlayerViewController, AVPlayerViewContr
         item.externalMetadata = Self.metadata(title: request.title, subtitle: request.subtitle)
 
         let player = AVPlayer(playerItem: item)
+        #if os(iOS)
         player.allowsExternalPlayback = true
+        #endif
         self.player = player
 
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in

@@ -88,7 +88,12 @@ enum Keychain {
 /// Small on-disk cache so Home and Library show instantly on launch while fresh data loads.
 enum DiskCache {
     private static var folder: URL {
+        #if os(tvOS)
+        // Apple TV apps may only write to Caches.
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        #else
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        #endif
         let dir = base.appendingPathComponent("Matinee", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir

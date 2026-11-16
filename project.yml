@@ -4,6 +4,7 @@ options:
   bundleIdPrefix: com.daniel
   deploymentTarget:
     iOS: "18.0"
+    tvOS: "18.0"
   createIntermediateGroups: true
 
 packages:
@@ -67,11 +68,60 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         UIFileSharingEnabled: false
 
+  MatineeTV:
+    type: application
+    platform: tvOS
+    sources:
+      - path: Matinee/App
+        excludes: ["MatineeApp.swift"]
+      - path: Matinee/Stremio
+      - path: Matinee/Player
+        excludes: ["MPVPlayerViewController.swift"]
+      - path: Matinee/Views/SharedComponents.swift
+      - path: MatineeTV
+    dependencies:
+      - package: MPVKit
+        product: MPVKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.daniel.matinee.tv
+        PRODUCT_NAME: Matinee
+        TARGETED_DEVICE_FAMILY: "3"
+        ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_BITCODE: NO
+        DEAD_CODE_STRIPPING: YES
+        SWIFT_STRICT_CONCURRENCY: minimal
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: NO
+    info:
+      path: MatineeTV/Info.plist
+      properties:
+        CFBundleDisplayName: Matinee
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UIRequiredDeviceCapabilities: [arm64]
+        UIUserInterfaceStyle: Dark
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        LSApplicationQueriesSchemes: [infuse]
+        ITSAppUsesNonExemptEncryption: false
+
 schemes:
   Matinee:
     build:
       targets:
         Matinee: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  MatineeTV:
+    build:
+      targets:
+        MatineeTV: all
     run:
       config: Debug
     archive:
