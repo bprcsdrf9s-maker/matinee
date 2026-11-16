@@ -18,14 +18,9 @@ final class StreamsModel {
 
     var allLoaded: Bool { groups.allSatisfy { !$0.loading } }
 
-    /// First working stream in addon order, preferring cached debrid results.
+    /// The highest-quality stream that plays right away; see BestStream for the order of preference.
     var best: StreamItem? {
-        let all = groups.flatMap(\.streams).filter(\.isWorking)
-        let preferred = all.first { stream in
-            let info = StreamInfo(stream)
-            return info.isCached || !(stream.name ?? "").contains("[")
-        }
-        return preferred ?? all.first
+        BestStream.pick(groups.flatMap(\.streams).filter(\.isWorking))
     }
 
     /// The streams to list for an addon: only working ones unless everything is being shown.

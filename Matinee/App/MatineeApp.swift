@@ -7,6 +7,7 @@ struct MatineeApp: App {
 
     init() {
         Pref.register()
+        NetworkStatus.shared.start()
         URLCache.shared = URLCache(memoryCapacity: 64 * 1024 * 1024, diskCapacity: 400 * 1024 * 1024)
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
     }

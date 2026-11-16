@@ -9,7 +9,7 @@ struct StreamInfo {
     let size: String?
     let container: String?
     let isCached: Bool
-    /// Lower is better; used for "Play best".
+    /// Lower is better. ("Play Best Match" uses BestStream instead.)
     let rank: Int
 
     init(_ stream: StreamItem) {
