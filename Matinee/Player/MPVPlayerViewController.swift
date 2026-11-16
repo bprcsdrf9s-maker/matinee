@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Combine
 
 /// Full-screen mpv player: a Metal video layer with SwiftUI controls on top.
 final class MPVPlayerViewController: UIViewController {
@@ -13,6 +14,7 @@ final class MPVPlayerViewController: UIViewController {
     private var timer: Timer?
     private var closed = false
     private var addedSubtitles = false
+    private var errorWatch: AnyCancellable?
 
     init(session: PlaybackSession, startAt: Double, notice: String?) {
         self.session = session
@@ -72,6 +74,12 @@ final class MPVPlayerViewController: UIViewController {
             autoSubtitles: defaults.bool(forKey: Pref.autoSubtitles)
         )
         player.onFileLoaded = { [weak self] in self?.loadAddonSubtitles() }
+        // A stream that fails here is hidden from the stream list for a week.
+        let failedURL = request.url
+        errorWatch = player.$errorMessage
+            .compactMap { $0 }
+            .first()
+            .sink { _ in BadStreams.mark(failedURL) }
         player.start(url: request.url, headers: request.headers, startAt: startAt, options: options)
 
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in

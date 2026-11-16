@@ -171,7 +171,9 @@ struct SettingsView: View {
     @AppStorage(Pref.autoSubtitles) private var autoSubs = false
     @AppStorage(Pref.syncProgress) private var sync = true
     @AppStorage(Pref.resumeAutomatically) private var resume = true
+    @AppStorage(Pref.onlyWorkingStreams) private var onlyWorking = true
     @State private var confirmSignOut = false
+    @State private var badCount = BadStreams.count
 
     var body: some View {
         Form {
@@ -214,6 +216,20 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("Only show working streams", isOn: $onlyWorking)
+                if badCount > 0 {
+                    Button("Unhide \(badCount) stream\(badCount == 1 ? "" : "s") that failed to play") {
+                        BadStreams.clear()
+                        badCount = 0
+                    }
+                }
+            } header: {
+                Text("Streams")
+            } footer: {
+                Text("Hides torrent-only results, debrid results that still need downloading, links that open outside the app, and streams that failed to play in the last 7 days. Addons with nothing playable are hidden too.")
+            }
+
+            Section {
                 Toggle("Save progress to Stremio", isOn: $sync)
             } footer: {
                 Text("Keeps Continue Watching in sync with Stremio on your other devices.")
@@ -226,6 +242,7 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.background)
         .navigationTitle("Settings")
+        .onAppear { badCount = BadStreams.count }
         .confirmationDialog("Sign out of Stremio?", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign Out", role: .destructive) { model.signOut() }
         }

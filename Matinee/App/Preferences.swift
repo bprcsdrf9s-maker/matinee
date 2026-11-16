@@ -32,6 +32,7 @@ enum Pref {
     static let autoSubtitles = "player.autosubs"
     static let syncProgress = "sync.progress"
     static let resumeAutomatically = "player.resume"
+    static let onlyWorkingStreams = "streams.onlyWorking"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -43,6 +44,7 @@ enum Pref {
             autoSubtitles: false,
             syncProgress: true,
             resumeAutomatically: true,
+            onlyWorkingStreams: true,
         ])
     }
 
@@ -103,6 +105,31 @@ enum DiskCache {
     static func clear() {
         try? FileManager.default.removeItem(at: folder)
     }
+}
+
+/// Streams that failed to play. They're hidden from the stream list for 7 days.
+enum BadStreams {
+    private static let key = "streams.bad"
+    private static let lifetime: TimeInterval = 7 * 24 * 3600
+
+    private static func load() -> [String: Date] {
+        let raw = UserDefaults.standard.dictionary(forKey: key) as? [String: Date] ?? [:]
+        let now = Date()
+        return raw.filter { now.timeIntervalSince($0.value) < lifetime }
+    }
+
+    static func isBad(_ url: URL) -> Bool { load()[url.absoluteString] != nil }
+
+    static func mark(_ url: URL) {
+        guard !url.isFileURL else { return }
+        var all = load()
+        all[url.absoluteString] = Date()
+        UserDefaults.standard.set(all, forKey: key)
+    }
+
+    static var count: Int { load().count }
+
+    static func clear() { UserDefaults.standard.removeObject(forKey: key) }
 }
 
 /// Resume points for things that aren't in the Stremio library (local files) or when sync is off.

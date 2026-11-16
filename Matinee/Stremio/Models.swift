@@ -348,6 +348,19 @@ struct StreamItem: Decodable, Identifiable, Hashable {
 
     var isPlayableInApp: Bool { url != nil }
 
+    /// Debrid results that aren't downloaded yet, e.g. Torrentio's "[TB download]" / "[RD download]".
+    /// Tapping one only starts a download on the debrid service, so it can't play right away.
+    var isUncachedDebrid: Bool {
+        (name ?? "").range(of: #"\[[A-Za-z]{2,3}\s*download\]"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    /// Plays in Matinee right now: has a direct link, isn't waiting on a debrid download,
+    /// and hasn't failed to play recently.
+    var isWorking: Bool {
+        guard let url, !isUncachedDebrid else { return false }
+        return !BadStreams.isBad(url)
+    }
+
     var playURL: URL? {
         if let url { return url }
         return nil

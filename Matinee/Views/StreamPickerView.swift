@@ -17,14 +17,24 @@ final class StreamsModel {
 
     var allLoaded: Bool { groups.allSatisfy { !$0.loading } }
 
-    /// First playable stream in addon order, preferring cached debrid results.
+    /// First working stream in addon order, preferring cached debrid results.
     var best: StreamItem? {
-        let all = groups.flatMap(\.streams).filter(\.isPlayableInApp)
+        let all = groups.flatMap(\.streams).filter(\.isWorking)
         let preferred = all.first { stream in
             let info = StreamInfo(stream)
             return info.isCached || !(stream.name ?? "").contains("[")
         }
         return preferred ?? all.first
+    }
+
+    /// The streams to list for an addon: only working ones unless everything is being shown.
+    func visible(_ group: AddonStreams, showAll: Bool) -> [StreamItem] {
+        showAll ? group.streams : group.streams.filter(\.isWorking)
+    }
+
+    /// How many streams the filter is hiding across all addons.
+    func hiddenCount(showAll: Bool) -> Int {
+        showAll ? 0 : groups.reduce(0) { $0 + $1.streams.count - $1.streams.filter(\.isWorking).count }
     }
 
     func load(addons: [AddonDescriptor], type: String, videoId: String) async {
@@ -53,8 +63,14 @@ struct StreamPickerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @AppStorage(Pref.resumeAutomatically) private var resumeDefault = true
+    @AppStorage(Pref.onlyWorkingStreams) private var onlyWorking = true
     @State private var streams = StreamsModel()
     @State private var resume = true
+    @State private var revealAll = false
+
+    private var showAll: Bool { !onlyWorking || revealAll }
+
+    private var loadingCount: Int { streams.groups.filter(\.loading).count }
 
     private var resumeAt: Double? {
         model.resumePosition(itemId: target.meta.id, videoId: target.videoId)
@@ -88,19 +104,25 @@ struct StreamPickerView: View {
                     }
                 }
 
+                if loadingCount > 0 {
+                    Section {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(loadingCount == 1 ? "Checking 1 more addon…" : "Checking \(loadingCount) addons…")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
                 ForEach(streams.groups) { group in
-                    if group.loading || group.failed || !group.streams.isEmpty {
+                    let list = streams.visible(group, showAll: showAll)
+                    if !list.isEmpty || (showAll && group.failed) {
                         Section {
-                            if group.loading && group.streams.isEmpty {
-                                HStack(spacing: 10) {
-                                    ProgressView()
-                                    Text("Finding streams…").foregroundStyle(.secondary)
-                                }
-                            } else if group.failed {
+                            if group.failed {
                                 Label("Couldn't reach this addon.", systemImage: "wifi.exclamationmark")
                                     .foregroundStyle(.secondary)
                             }
-                            ForEach(group.streams) { stream in
+                            ForEach(list) { stream in
                                 StreamRow(stream: stream)
                                     .contentShape(Rectangle())
                                     .onTapGesture { play(stream, engine: nil) }
@@ -112,12 +134,27 @@ struct StreamPickerView: View {
                     }
                 }
 
+                if streams.allLoaded && onlyWorking {
+                    let hidden = streams.hiddenCount(showAll: showAll)
+                    if hidden > 0 || revealAll {
+                        Section {
+                            Button(revealAll ? "Show only working streams" : "Show \(hidden) hidden stream\(hidden == 1 ? "" : "s")") {
+                                withAnimation { revealAll.toggle() }
+                            }
+                        } footer: {
+                            Text("Hidden: torrent-only results, debrid results that still need downloading, links that open outside the app, and streams that failed to play in the last 7 days.")
+                        }
+                    }
+                }
+
                 if streams.started && streams.groups.isEmpty {
                     EmptyStateView(symbol: "antenna.radiowaves.left.and.right.slash", title: "No stream addons",
                                    message: "Install a stream addon like Torrentio in Stremio, then pull to refresh on Home.")
-                } else if streams.allLoaded && streams.groups.allSatisfy({ $0.streams.isEmpty }) && !streams.groups.isEmpty {
-                    EmptyStateView(symbol: "film.stack", title: "No streams found",
-                                   message: "Your addons didn't return anything for this one.")
+                } else if streams.allLoaded && !streams.groups.isEmpty
+                            && streams.groups.allSatisfy({ streams.visible($0, showAll: showAll).isEmpty }) {
+                    EmptyStateView(symbol: "film.stack", title: "No working streams",
+                                   message: showAll ? "Your addons didn't return anything for this one."
+                                                    : "Nothing that plays right away. Try again later, or show the hidden streams.")
                 }
             }
             .listStyle(.insetGrouped)
