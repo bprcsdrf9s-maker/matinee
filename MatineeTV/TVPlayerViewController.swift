@@ -3,7 +3,8 @@ import UIKit
 import Combine
 
 /// Full-screen mpv player for Apple TV, driven by the Siri Remote:
-/// click or Play/Pause to pause, left/right to skip, down for audio and subtitles, Back to close.
+/// click or Play/Pause to pause, left/right to skip, swipe left/right to scrub the whole timeline
+/// (click to jump there, Back to cancel), hold left/right to fast-scan, down for audio and subtitles, Back to close.
 final class MPVPlayerViewController: UIViewController {
     let session: PlaybackSession
     let player = MPVPlayer()
@@ -17,6 +18,7 @@ final class MPVPlayerViewController: UIViewController {
     private var closed = false
     private var addedSubtitles = false
     private var errorWatch: AnyCancellable?
+    private lazy var scrub = TVScrubber(player: player)
 
     init(session: PlaybackSession, startAt: Double, notice: String?) {
         self.session = session
@@ -47,6 +49,7 @@ final class MPVPlayerViewController: UIViewController {
         let request = session.request
         let controls = TVMPVControlsView(
             player: player,
+            scrub: scrub,
             title: request.title,
             subtitle: request.subtitle,
             notice: notice,
@@ -63,6 +66,24 @@ final class MPVPlayerViewController: UIViewController {
         view.addSubview(host.view)
         host.didMove(toParent: self)
         self.host = host
+
+        scrub.onSeek = { [weak self] seconds in self?.session.seeked(to: seconds) }
+        // Swiping on the clickpad scrubs the timeline, like the Apple TV app.
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
+        pan.cancelsTouchesInView = false
+        pan.delegate = self
+        view.addGestureRecognizer(pan)
+        // Holding left or right scans backward or forward, faster the longer it's held.
+        for (press, action) in [(UIPress.PressType.leftArrow, #selector(holdLeft(_:))),
+                                (UIPress.PressType.rightArrow, #selector(holdRight(_:)))] {
+            let hold = UILongPressGestureRecognizer(target: self, action: action)
+            hold.allowedPressTypes = [NSNumber(value: press.rawValue)]
+            hold.allowedTouchTypes = []
+            hold.minimumPressDuration = 0.5
+            hold.delegate = self
+            view.addGestureRecognizer(hold)
+        }
 
         let defaults = UserDefaults.standard
         let options = MPVPlayer.Options(
@@ -141,6 +162,7 @@ final class MPVPlayerViewController: UIViewController {
     private func teardown() {
         guard !closed else { return }
         closed = true
+        scrub.stopHold()
         report()
         timer?.invalidate()
         timer = nil
@@ -162,6 +184,157 @@ final class MPVPlayerViewController: UIViewController {
     }
 }
 
+extension MPVPlayerViewController: UIGestureRecognizerDelegate {
+    @objc fileprivate func handlePan(_ gesture: UIPanGestureRecognizer) {
+        guard !scrub.blocked, player.started, player.duration > 0 else { return }
+        switch gesture.state {
+        case .began:
+            scrub.panBegan()
+        case .changed:
+            // A swipe the width of the screen moves through half the movie.
+            let width = max(1, view.bounds.width)
+            scrub.panChanged(fraction: Double(gesture.translation(in: view).x / width) * 0.5)
+        case .ended, .cancelled, .failed:
+            scrub.panEnded()
+        default:
+            break
+        }
+    }
+
+    @objc fileprivate func holdLeft(_ gesture: UILongPressGestureRecognizer) { hold(gesture, direction: -1) }
+    @objc fileprivate func holdRight(_ gesture: UILongPressGestureRecognizer) { hold(gesture, direction: 1) }
+
+    private func hold(_ gesture: UILongPressGestureRecognizer, direction: Double) {
+        switch gesture.state {
+        case .began:
+            guard !scrub.blocked, player.started, player.duration > 0 else { return }
+            scrub.startHold(direction)
+        case .ended, .cancelled, .failed:
+            scrub.endHold()
+        default:
+            break
+        }
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        // Only mostly-sideways swipes scrub, so swiping down still opens Audio & Subtitles.
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+        let v = pan.velocity(in: view)
+        return abs(v.x) > abs(v.y)
+    }
+}
+
+/// Timeline scrubbing for the Siri Remote: a marker you move by swiping or holding,
+/// then commit with a click (or Play) or throw away with Back.
+@MainActor
+final class TVScrubber: ObservableObject {
+    /// Where the marker is while scrubbing; nil when not scrubbing.
+    @Published private(set) var target: Double?
+    /// Set by the controls while the options panel or an error covers the player.
+    var blocked = false
+    var onSeek: ((Double) -> Void)?
+
+    private let player: MPVPlayer
+    private var wasPlaying = false
+    private var panStart: Double = 0
+    private var panning = false
+    private var lastPanEnd = Date.distantPast
+    private var holdTimer: Timer?
+    private var holdDirection: Double = 0
+    private var holdStarted = Date()
+
+    init(player: MPVPlayer) { self.player = player }
+
+    var active: Bool { target != nil }
+    private(set) var holding = false
+
+    /// Swipes and holds can also produce left/right move commands; those shouldn't add a 10s skip on top.
+    var swallowsMove: Bool { panning || holding || Date().timeIntervalSince(lastPanEnd) < 0.4 }
+
+    private func begin() {
+        guard target == nil else { return }
+        wasPlaying = !player.paused
+        if wasPlaying { player.pause() }
+        target = player.position
+    }
+
+    private func clamp(_ t: Double) -> Double {
+        guard player.duration > 0 else { return max(0, t) }
+        return min(max(0, t), max(0, player.duration - 1))
+    }
+
+    func move(by seconds: Double) {
+        begin()
+        target = clamp((target ?? player.position) + seconds)
+    }
+
+    func panBegan() {
+        begin()
+        panning = true
+        panStart = target ?? player.position
+    }
+
+    func panChanged(fraction: Double) {
+        guard player.duration > 0 else { return }
+        target = clamp(panStart + fraction * player.duration)
+    }
+
+    func panEnded() {
+        panning = false
+        lastPanEnd = Date()
+    }
+
+    func startHold(_ direction: Double) {
+        begin()
+        holding = true
+        holdDirection = direction
+        holdStarted = Date()
+        holdTimer?.invalidate()
+        holdTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.holdTick() }
+        }
+    }
+
+    /// Letting go of a hold jumps to where the marker got to.
+    func endHold() {
+        guard holding else { return }
+        stopHold()
+        commit()
+    }
+
+    func stopHold() {
+        holdTimer?.invalidate()
+        holdTimer = nil
+        holding = false
+    }
+
+    private func holdTick() {
+        // Video-seconds per real second: 30s, then 1.5 min, 4 min and 8 min the longer it's held.
+        let held = Date().timeIntervalSince(holdStarted)
+        let rate: Double = held < 2 ? 30 : held < 4 ? 90 : held < 6 ? 240 : 480
+        move(by: holdDirection * rate * 0.1)
+    }
+
+    func commit() {
+        guard let t = target else { return }
+        stopHold()
+        target = nil
+        player.seek(to: t)
+        onSeek?(t)
+        if wasPlaying { player.play() }
+    }
+
+    func cancel() {
+        guard target != nil else { return }
+        stopHold()
+        target = nil
+        if wasPlaying { player.play() }
+    }
+}
+
 /// Draws nothing for a button that only exists to receive remote presses.
 private struct InvisibleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -171,6 +344,7 @@ private struct InvisibleButtonStyle: ButtonStyle {
 
 struct TVMPVControlsView: View {
     @ObservedObject var player: MPVPlayer
+    @ObservedObject var scrub: TVScrubber
     let title: String
     let subtitle: String?
     let notice: String?
@@ -197,7 +371,7 @@ struct TVMPVControlsView: View {
         ZStack {
             // Takes the remote's presses while nothing else is on screen.
             Button {
-                player.togglePause()
+                if scrub.active { scrub.commit() } else { player.togglePause() }
                 showOverlay()
             } label: {
                 Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -211,7 +385,7 @@ struct TVMPVControlsView: View {
                 ProgressView().scaleEffect(1.5)
             }
 
-            if player.paused && player.started && !panel && player.errorMessage == nil {
+            if player.paused && player.started && !panel && !scrub.active && player.errorMessage == nil {
                 Image(systemName: "pause.fill")
                     .font(.system(size: 80, weight: .semibold))
                     .padding(40)
@@ -227,7 +401,7 @@ struct TVMPVControlsView: View {
                     .transition(.opacity)
             }
 
-            if overlay && !panel && player.errorMessage == nil {
+            if (overlay || scrub.active) && !panel && player.errorMessage == nil {
                 bottomBar.transition(.opacity)
             }
 
@@ -259,18 +433,28 @@ struct TVMPVControlsView: View {
         }
         .foregroundStyle(.white)
         .onPlayPauseCommand {
-            player.togglePause()
+            if scrub.active {
+                scrub.commit()
+                player.play()
+            } else {
+                player.togglePause()
+            }
             showOverlay()
         }
         .onExitCommand(perform: exit)
         .onAppear { focus = .surface }
         .onChange(of: player.errorMessage) { _, message in
-            if message != nil { focus = .errorClose }
+            if message != nil { focus = .errorClose; scrub.cancel() }
+            scrub.blocked = panel || message != nil
         }
+        .onChange(of: panel) { _, open in
+            scrub.blocked = open || player.errorMessage != nil
+        }
+        .onChange(of: scrub.active) { _, _ in showOverlay() }
         .task(id: interaction) {
             // Hide the bar a few seconds after the last press while playing.
             try? await Task.sleep(for: .seconds(5))
-            guard !Task.isCancelled, !player.paused, !panel else { return }
+            guard !Task.isCancelled, !player.paused, !panel, !scrub.active else { return }
             withAnimation(.easeOut(duration: 0.4)) { overlay = false }
         }
         .animation(.easeInOut(duration: 0.25), value: panel)
@@ -286,16 +470,23 @@ struct TVMPVControlsView: View {
 
     private func move(_ direction: MoveCommandDirection) {
         switch direction {
-        case .left: skip(-Double(skipSeconds))
-        case .right: skip(Double(skipSeconds))
-        case .down: openPanel()
+        case .left, .right:
+            guard !scrub.swallowsMove else { return }
+            let step = direction == .left ? -Double(skipSeconds) : Double(skipSeconds)
+            if scrub.active { scrub.move(by: step); showOverlay() } else { skip(step) }
+        case .down:
+            scrub.cancel()
+            openPanel()
         case .up: showOverlay()
         @unknown default: break
         }
     }
 
     private func exit() {
-        if panel {
+        if scrub.active {
+            scrub.cancel()
+            showOverlay()
+        } else if panel {
             panel = false
             focus = .surface
             showOverlay()
@@ -339,20 +530,37 @@ struct TVMPVControlsView: View {
                 if let subtitle { Text(subtitle).font(.callout).opacity(0.8).lineLimit(1) }
             }
             GeometryReader { geo in
-                let fraction = player.duration > 0 ? min(1, max(0, player.position / player.duration)) : 0
+                let shown = scrub.target ?? player.position
+                let played = player.duration > 0 ? min(1, max(0, player.position / player.duration)) : 0
+                let marker = player.duration > 0 ? min(1, max(0, shown / player.duration)) : 0
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.3))
-                    Capsule().fill(.white).frame(width: max(10, geo.size.width * fraction))
+                    Capsule().fill(.white.opacity(scrub.active ? 0.55 : 1))
+                        .frame(width: max(10, geo.size.width * played))
+                    if scrub.active {
+                        Capsule().fill(.white)
+                            .frame(width: 6, height: 36)
+                            .offset(x: geo.size.width * marker - 3)
+                        Text(Format.clock(shown))
+                            .font(.title3.weight(.bold).monospacedDigit())
+                            .padding(.horizontal, 18).padding(.vertical, 8)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .fixedSize()
+                            .position(x: min(max(geo.size.width * marker, 80), geo.size.width - 80), y: -40)
+                    }
                 }
             }
             .frame(height: 10)
+            .padding(.top, scrub.active ? 56 : 0)
             HStack {
-                Text(Format.clock(player.position))
+                Text(Format.clock(scrub.target ?? player.position))
                 Spacer()
-                Text("◀︎ ▶︎ \(skipSeconds)s     ▼ Audio & Subtitles")
+                Text(scrub.active
+                     ? "Click to jump here     Back to cancel"
+                     : "◀︎ ▶︎ \(skipSeconds)s     Swipe or hold to scrub     ▼ Audio & Subtitles")
                     .opacity(0.7)
                 Spacer()
-                Text("-" + Format.clock(max(0, player.duration - player.position)))
+                Text("-" + Format.clock(max(0, player.duration - (scrub.target ?? player.position))))
             }
             .font(.caption.monospacedDigit())
         }
