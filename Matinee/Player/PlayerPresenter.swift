@@ -208,6 +208,9 @@ final class ApplePlayerViewController: AVPlayerViewController, AVPlayerViewContr
     private var closed = false
     private var appeared = false
     private var failedBeforeAppearing = false
+    #if os(iOS)
+    private var headphones: HeadphoneControls?
+    #endif
 
     init(session: PlaybackSession) {
         self.session = session
@@ -252,6 +255,18 @@ final class ApplePlayerViewController: AVPlayerViewController, AVPlayerViewContr
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             DispatchQueue.main.async { self?.statusChanged(item) }
         }
+        #if os(iOS)
+        // Apple's player already answers AirPods play/pause and ear detection; this adds
+        // pause-on-disconnect and resume when the headphones come back.
+        headphones = HeadphoneControls(
+            title: request.title, subtitle: request.subtitle, handlesCommands: false,
+            actions: .init(
+                play: { [weak self] in self?.player?.play() },
+                pause: { [weak self] in self?.player?.pause() },
+                isPaused: { [weak self] in (self?.player?.rate ?? 0) == 0 }
+            )
+        )
+        #endif
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600),
                                                       queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.reportTime() }
@@ -318,9 +333,16 @@ final class ApplePlayerViewController: AVPlayerViewController, AVPlayerViewContr
         let pos = player.currentTime().seconds
         let dur = item.duration.seconds
         session.tick(position: pos, duration: dur.isFinite ? dur : 0, playing: player.rate > 0)
+        #if os(iOS)
+        headphones?.update(position: pos, duration: dur, playing: player.rate > 0)
+        #endif
     }
 
     private func cleanup() {
+        #if os(iOS)
+        headphones?.invalidate()
+        headphones = nil
+        #endif
         if let timeObserver { player?.removeTimeObserver(timeObserver) }
         timeObserver = nil
         statusObservation?.invalidate()

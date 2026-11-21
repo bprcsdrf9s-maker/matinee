@@ -18,6 +18,7 @@ final class MPVPlayerViewController: UIViewController {
     private var outputPixels: CGSize = .zero   // size mpv's video output was last built at
     private var rebuildWork: DispatchWorkItem?
     private var rotating = false
+    private var headphones: HeadphoneControls?
 
     init(session: PlaybackSession, startAt: Double, notice: String?) {
         self.session = session
@@ -86,6 +87,21 @@ final class MPVPlayerViewController: UIViewController {
             .sink { _ in BadStreams.mark(failedURL) }
         player.start(url: request.url, headers: request.headers, startAt: startAt, options: options)
 
+        // AirPods: press to play/pause, take one out to pause, put it back to resume.
+        headphones = HeadphoneControls(
+            title: request.title, subtitle: request.subtitle, handlesCommands: true,
+            actions: .init(
+                play: { [weak self] in self?.player.play() },
+                pause: { [weak self] in self?.player.pause() },
+                isPaused: { [weak self] in self?.player.paused ?? true },
+                skip: { [weak self] seconds in self?.player.skip(seconds) },
+                seek: { [weak self] seconds in
+                    self?.player.seek(to: seconds)
+                    self?.session.seeked(to: seconds)
+                }
+            )
+        )
+
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.report() }
         }
@@ -151,6 +167,8 @@ final class MPVPlayerViewController: UIViewController {
         guard player.started else { return }
         session.tick(position: player.position, duration: player.duration, playing: !player.paused && !player.buffering,
                      keepAwake: !player.paused)
+        headphones?.update(position: player.position, duration: player.duration,
+                           playing: !player.paused && !player.buffering)
     }
 
     private func loadAddonSubtitles() {
@@ -187,6 +205,8 @@ final class MPVPlayerViewController: UIViewController {
         report()
         timer?.invalidate()
         timer = nil
+        headphones?.invalidate()
+        headphones = nil
         NotificationCenter.default.removeObserver(self)
         player.shutdown()
         onClose?()
