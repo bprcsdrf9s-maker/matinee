@@ -15,6 +15,9 @@ final class MPVPlayerViewController: UIViewController {
     private var closed = false
     private var addedSubtitles = false
     private var errorWatch: AnyCancellable?
+    private var outputPixels: CGSize = .zero   // size mpv's video output was last built at
+    private var rebuildWork: DispatchWorkItem?
+    private var rotating = false
 
     init(session: PlaybackSession, startAt: Double, notice: String?) {
         self.session = session
@@ -40,6 +43,7 @@ final class MPVPlayerViewController: UIViewController {
         view.backgroundColor = .black
 
         videoView.backgroundColor = .black
+        videoView.clipsToBounds = true
         videoView.frame = view.bounds
         videoView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(videoView)
@@ -95,11 +99,52 @@ final class MPVPlayerViewController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        fitVideoToView()
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        rotating = true
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            guard let self else { return }
+            self.rotating = false
+            self.view.setNeedsLayout()
+            self.view.layoutIfNeeded()
+            self.fitVideoToView()
+        }
+    }
+
+    /// The video layer is a square as big as the screen's long side, centered, so its size is
+    /// the same in portrait and landscape. Rotating only changes the margins mpv keeps the
+    /// picture inside, which is instant. A real size change (Split View) rebuilds the output.
+    private func fitVideoToView() {
+        let bounds = videoView.bounds
+        guard bounds.width > 1, bounds.height > 1 else { return }
+        let scale = view.window?.screen.scale ?? traitCollection.displayScale
+        let side = max(bounds.width, bounds.height)
+        let frame = CGRect(x: (bounds.width - side) / 2, y: (bounds.height - side) / 2, width: side, height: side)
+        let pixels = CGSize(width: (side * scale).rounded(), height: (side * scale).rounded())
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        player.layer.frame = videoView.bounds
-        player.layer.contentsScale = traitCollection.displayScale
+        player.layer.frame = frame
+        player.layer.contentsScale = scale
+        player.layer.drawableSize = pixels
         CATransaction.commit()
+        player.setVisibleMargins(x: Double((side - bounds.width) / 2 / side),
+                                 y: Double((side - bounds.height) / 2 / side))
+
+        if outputPixels == .zero { outputPixels = pixels; return }
+        guard !rotating, pixels != outputPixels else { return }
+        rebuildWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.rotating else { return }
+            let current = self.player.layer.drawableSize
+            guard current != self.outputPixels else { return }
+            self.outputPixels = current
+            self.player.rebuildVideoOutput()
+        }
+        rebuildWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     private func report() {
@@ -133,6 +178,7 @@ final class MPVPlayerViewController: UIViewController {
 
     @objc private func willEnterForeground() {
         player.setVideoEnabled(true)
+        outputPixels = player.layer.drawableSize
     }
 
     private func close() {

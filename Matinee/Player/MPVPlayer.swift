@@ -51,6 +51,8 @@ final class MPVPlayer: ObservableObject {
 
     let layer = MPVMetalLayer()
     var onFileLoaded: (() -> Void)?
+    /// Part of the (square) video layer hidden off-screen, as ratios: (sides, top/bottom).
+    private var margins: (x: Double, y: Double) = (0, 0)
 
     private var mpv: OpaquePointer?
     private let eventQueue = DispatchQueue(label: "matinee.mpv.events", qos: .userInitiated)
@@ -90,6 +92,8 @@ final class MPVPlayer: ObservableObject {
         set("gpu-context", "moltenvk")
         set("hwdec", options.hardwareDecoding ? "videotoolbox" : "no")
         set("video-rotate", "no")
+        set("sub-use-margins", "no")
+        applyMargins(set)
         set("keep-open", "yes")
         set("ytdl", "no")
         set("cache", "yes")
@@ -172,6 +176,39 @@ final class MPVPlayer: ObservableObject {
     /// Adds an external subtitle. mpv downloads it, so this runs off the main thread.
     func addSubtitle(url: URL, title: String, lang: String) {
         command(["sub-add", url.absoluteString, "auto", title, lang], async: true)
+    }
+
+    /// mpv's MoltenVK output never notices the layer being resized (e.g. on rotation): it keeps
+    /// drawing at the old size into the corner of the new one. Turning video off and back on
+    /// makes mpv build a fresh output at the layer's current size. Works while paused, too.
+    func rebuildVideoOutput() {
+        guard let h = mpv else { return }
+        commandQueue.async {
+            guard self.mpv == h else { return }
+            let current = self.getString(h, "vid") ?? "auto"
+            mpv_set_property_string(h, "vid", "no")
+            mpv_set_property_string(h, "vid", current == "no" ? "auto" : current)
+        }
+    }
+
+    /// Keeps the picture inside the on-screen part of the square video layer. Cheap and instant:
+    /// no output rebuild, so rotation doesn't interrupt playback.
+    func setVisibleMargins(x: Double, y: Double) {
+        guard margins.x != x || margins.y != y else { return }
+        margins = (x, y)
+        guard let h = mpv else { return }
+        applyMargins { name, value in mpv_set_property_string(h, name, value) }
+        // Re-setting zoom forces mpv to recompute the video rect and redraw, even while paused.
+        let zoom = getString(h, "video-zoom") ?? "0"
+        mpv_set_property_string(h, "video-zoom", zoom)
+    }
+
+    private func applyMargins(_ apply: (String, String) -> Void) {
+        let x = String(format: "%.5f", margins.x), y = String(format: "%.5f", margins.y)
+        apply("video-margin-ratio-left", x)
+        apply("video-margin-ratio-right", x)
+        apply("video-margin-ratio-top", y)
+        apply("video-margin-ratio-bottom", y)
     }
 
     /// MoltenVK can't draw while the app is in the background; turn video off and back on.
