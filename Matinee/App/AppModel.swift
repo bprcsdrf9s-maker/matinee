@@ -9,6 +9,10 @@ final class AppModel {
     private(set) var email: String?
     private(set) var addons: [AddonDescriptor] = []
     private(set) var library: [LibraryEntry] = []
+    /// A title to open from outside the navigation stack (the end-of-movie screen). The tab view pushes it.
+    var pendingDetail: MetaItem?
+
+    func openDetail(_ item: MetaItem) { pendingDetail = item }
     /// Same entries keyed by id, for quick lookups from every poster.
     private(set) var libraryById: [String: LibraryEntry] = [:]
 

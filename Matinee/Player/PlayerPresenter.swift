@@ -1,4 +1,5 @@
 import AVKit
+import SwiftUI
 import UIKit
 
 struct PlaybackRequest {
@@ -47,10 +48,36 @@ final class PlaybackSession {
     private(set) var position: Double = 0
     private(set) var duration: Double = 0
 
+    /// Movies get "More Like This" at the end; similar titles load in the background.
+    let isMovie: Bool
+    private var similarTask: Task<[MetaItem], Never>?
+    /// Set by the player so the session can close it (movie ended, or More Like This tapped).
+    var requestClose: (() -> Void)?
+    private(set) var wantsPostPlay = false
+
     init(request: PlaybackRequest, model: AppModel?) {
         self.request = request
         self.model = model
         self.position = request.startAt
+        isMovie = PostPlay.eligible(request)
+        if isMovie, let seed = request.seed {
+            let known = Set(model?.library.filter { $0.isWatched || $0.isInLibrary }.map(\.id) ?? [])
+            let meta = MetaItem(id: seed.id, type: seed.type, name: seed.name, poster: seed.poster)
+            similarTask = Task { await TasteRecommender.similar(to: meta, known: known) }
+        }
+    }
+
+    var inCredits: Bool { PostPlay.inCredits(position: position, duration: duration) }
+    /// Whether the player should show its "More Like This" button right now.
+    var showsMoreLikeThisButton: Bool { isMovie && !finished && inCredits }
+
+    func similarTitles() async -> [MetaItem] { await similarTask?.value ?? [] }
+
+    /// Leaves the player for the "More Like This" screen.
+    func openMoreLikeThis() {
+        guard isMovie, !wantsPostPlay else { return }
+        wantsPostPlay = true
+        requestClose?()
     }
 
     /// Called about once a second by the player.
@@ -67,6 +94,8 @@ final class PlaybackSession {
         self.position = position
         if duration.isFinite, duration > 0 { self.duration = duration }
         if Date().timeIntervalSince(lastSync) > 60 { sync(closing: false) }
+        // The movie reached its end: go to More Like This.
+        if isMovie, !playing, self.duration > 300, position >= self.duration - 2 { openMoreLikeThis() }
     }
 
     func seeked(to position: Double) {
@@ -166,10 +195,35 @@ final class PlayerPresenter {
     // MARK: Helpers
 
     private func end(_ session: PlaybackSession) {
+        // Closing during the credits, or at the very end, of a movie shows More Like This.
+        let postPlay = session.isMovie && (session.wantsPostPlay || session.inCredits)
+        session.requestClose = nil
         session.finish()
         if self.session === session {
             self.session = nil
             stopScopedAccess()
+        }
+        if postPlay { presentPostPlay(for: session) }
+    }
+
+    private func presentPostPlay(for session: PlaybackSession) {
+        // Wait for the player to finish closing.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+            guard let self else { return }
+            var host: UIViewController?
+            let view = PostPlayView(
+                finishedTitle: session.request.title,
+                backdrop: nil,
+                load: { await session.similarTitles() },
+                onPick: { [weak self] item in
+                    host?.dismiss(animated: true) { self?.model?.openDetail(item) }
+                },
+                onClose: { host?.dismiss(animated: true) }
+            )
+            let vc = UIHostingController(rootView: view)
+            vc.view.backgroundColor = .black
+            host = vc
+            self.present(vc)
         }
     }
 
@@ -210,7 +264,9 @@ final class ApplePlayerViewController: AVPlayerViewController, AVPlayerViewContr
     private var failedBeforeAppearing = false
     #if os(iOS)
     private var headphones: HeadphoneControls?
+    private let moreButton = PostPlayButton.make()
     #endif
+    private var endObserver: NSObjectProtocol?
 
     init(session: PlaybackSession) {
         self.session = session
@@ -266,6 +322,16 @@ final class ApplePlayerViewController: AVPlayerViewController, AVPlayerViewContr
                 isPaused: { [weak self] in (self?.player?.rate ?? 0) == 0 }
             )
         )
+        #endif
+        session.requestClose = { [weak self] in self?.dismiss(animated: true) }
+        if session.isMovie {
+            endObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.session.openMoreLikeThis() }
+            }
+        }
+        #if os(iOS)
+        moreButton.pin(in: view)
+        moreButton.onTap = { [weak self] in self?.session.openMoreLikeThis() }
         #endif
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600),
                                                       queue: .main) { [weak self] _ in
@@ -335,10 +401,21 @@ final class ApplePlayerViewController: AVPlayerViewController, AVPlayerViewContr
         session.tick(position: pos, duration: dur.isFinite ? dur : 0, playing: player.rate > 0)
         #if os(iOS)
         headphones?.update(position: pos, duration: dur, playing: player.rate > 0)
+        moreButton.setShown(session.showsMoreLikeThisButton)
+        #else
+        // Apple TV: a "More Like This" button in the corner while the credits roll.
+        let wantsAction = session.showsMoreLikeThisButton
+        if wantsAction != !contextualActions.isEmpty {
+            contextualActions = wantsAction ? [UIAction(title: "More Like This", image: UIImage(systemName: "square.grid.2x2.fill")) { [weak self] _ in
+                self?.session.openMoreLikeThis()
+            }] : []
+        }
         #endif
     }
 
     private func cleanup() {
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        endObserver = nil
         #if os(iOS)
         headphones?.invalidate()
         headphones = nil

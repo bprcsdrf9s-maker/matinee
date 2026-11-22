@@ -19,6 +19,7 @@ final class MPVPlayerViewController: UIViewController {
     private var rebuildWork: DispatchWorkItem?
     private var rotating = false
     private var headphones: HeadphoneControls?
+    private let moreButton = PostPlayButton.make()
 
     init(session: PlaybackSession, startAt: Double, notice: String?) {
         self.session = session
@@ -70,6 +71,9 @@ final class MPVPlayerViewController: UIViewController {
         host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(host.view)
         host.didMove(toParent: self)
+        moreButton.pin(in: view)
+        moreButton.onTap = { [weak self] in self?.session.openMoreLikeThis() }
+        session.requestClose = { [weak self] in self?.close() }
 
         let defaults = UserDefaults.standard
         let options = MPVPlayer.Options(
@@ -169,6 +173,7 @@ final class MPVPlayerViewController: UIViewController {
                      keepAwake: !player.paused)
         headphones?.update(position: player.position, duration: player.duration,
                            playing: !player.paused && !player.buffering)
+        moreButton.setShown(session.showsMoreLikeThisButton)
     }
 
     private func loadAddonSubtitles() {

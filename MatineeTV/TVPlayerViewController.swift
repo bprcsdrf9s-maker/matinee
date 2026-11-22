@@ -37,6 +37,7 @@ final class MPVPlayerViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
+        session.requestClose = { [weak self] in self?.close() }
 
         videoView.backgroundColor = .black
         videoView.frame = view.bounds

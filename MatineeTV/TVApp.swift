@@ -58,26 +58,39 @@ enum TVTab: Hashable {
 
 /// The tab bar along the top of the screen, like the Apple TV app.
 struct TVTabs: View {
+    @Environment(AppModel.self) private var model
     @State private var selection: TVTab = .home
+    @State private var paths: [TVTab: NavigationPath] = [:]
 
     var body: some View {
         TabView(selection: $selection) {
             Tab("Home", systemImage: "house", value: TVTab.home) {
-                NavigationStack { TVHomeView().tvDestinations() }
+                NavigationStack(path: path(.home)) { TVHomeView().tvDestinations() }
             }
             Tab("Discover", systemImage: "safari", value: TVTab.discover) {
-                NavigationStack { TVDiscoverView().tvDestinations() }
+                NavigationStack(path: path(.discover)) { TVDiscoverView().tvDestinations() }
             }
             Tab("Library", systemImage: "square.stack", value: TVTab.library) {
-                NavigationStack { TVLibraryView().tvDestinations() }
+                NavigationStack(path: path(.library)) { TVLibraryView().tvDestinations() }
             }
             Tab(value: TVTab.search, role: .search) {
-                NavigationStack { TVSearchView().tvDestinations() }
+                NavigationStack(path: path(.search)) { TVSearchView().tvDestinations() }
             }
             Tab("Settings", systemImage: "gearshape", value: TVTab.settings) {
                 NavigationStack { TVSettingsView() }
             }
         }
+        .onChange(of: model.pendingDetail) { _, item in
+            guard let item else { return }
+            let tab = selection == .settings ? TVTab.home : selection
+            selection = tab
+            paths[tab, default: NavigationPath()].append(TVRoute.meta(item))
+            model.pendingDetail = nil
+        }
+    }
+
+    private func path(_ tab: TVTab) -> Binding<NavigationPath> {
+        Binding(get: { paths[tab] ?? NavigationPath() }, set: { paths[tab] = $0 })
     }
 }
 

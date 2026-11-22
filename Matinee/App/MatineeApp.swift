@@ -57,6 +57,7 @@ struct RootView: View {
 /// Five tabs under a floating capsule tab bar. Each tab keeps its own navigation history,
 /// and a tab is only built the first time it's opened.
 struct MainTabs: View {
+    @Environment(AppModel.self) private var model
     @State private var selection: MainTab = .board
     @State private var opened: Set<MainTab> = [.board]
     @State private var paths: [MainTab: NavigationPath] = [:]
@@ -93,6 +94,11 @@ struct MainTabs: View {
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .background(Theme.background.ignoresSafeArea())
         .onChange(of: selection) { _, tab in opened.insert(tab) }
+        .onChange(of: model.pendingDetail) { _, item in
+            guard let item else { return }
+            paths[selection, default: NavigationPath()].append(Route.meta(item))
+            model.pendingDetail = nil
+        }
     }
 
     private func path(for tab: MainTab) -> Binding<NavigationPath> {
