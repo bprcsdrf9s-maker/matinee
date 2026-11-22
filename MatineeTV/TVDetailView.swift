@@ -12,6 +12,7 @@ struct TVDetailView: View {
     @State private var season = 1
     @State private var target: StreamTarget?
     @State private var didAutoplay = false
+    @State private var similar: [MetaItem] = []
     @FocusState private var playFocused: Bool
 
     private var current: MetaItem { meta ?? preview }
@@ -22,6 +23,9 @@ struct TVDetailView: View {
             VStack(alignment: .leading, spacing: 40) {
                 header
                 if current.hasEpisodes { episodes }
+                if !similar.isEmpty {
+                    TVPosterRow(title: "More Like This", items: similar)
+                }
             }
             .padding(.bottom, 80)
         }
@@ -30,6 +34,11 @@ struct TVDetailView: View {
             TVStreamPickerView(target: t)
         }
         .task { await load() }
+        .task(id: loaded) {
+            guard loaded, similar.isEmpty else { return }
+            let known = Set(model.library.filter { $0.isWatched || $0.isInLibrary }.map(\.id))
+            similar = await TasteRecommender.similar(to: current, known: known)
+        }
         .onAppear { playFocused = true }
     }
 

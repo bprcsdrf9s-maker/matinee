@@ -174,6 +174,7 @@ extension TMDB.Item {
 }
 
 /// Builds the profile's recommendation rows from what it has been watching.
+/// Works with no key, from Cinemeta; a TMDB key, if added, blends TMDB's picks into "Recommended for You".
 @MainActor
 @Observable
 final class RecommendationsModel {
@@ -185,6 +186,7 @@ final class RecommendationsModel {
 
     private(set) var recommended: [MetaItem] = []
     private(set) var trending: [MetaItem] = []
+    private(set) var newForYou: [MetaItem] = []
     private(set) var becauseYouWatched: [Row] = []
     private(set) var loading = false
     @ObservationIgnored private var loadedKey = ""
@@ -199,6 +201,7 @@ final class RecommendationsModel {
     var trailingRows: [Row] {
         var rows: [Row] = []
         if !trending.isEmpty { rows.append(Row(id: "trending", title: "Trending Now", items: trending)) }
+        if !newForYou.isEmpty { rows.append(Row(id: "new", title: "New for You", items: newForYou)) }
         return rows + becauseYouWatched
     }
 
@@ -208,26 +211,78 @@ final class RecommendationsModel {
     }
 
     func load(library: [LibraryEntry], profileId: String?, force: Bool = false) async {
-        guard TMDB.isConfigured else {
-            recommended = []; trending = []; becauseYouWatched = []
-            return
-        }
-        // Titles the profile watched or saved, newest first; these drive the recommendations.
-        let seeds = library
-            .filter { $0.id.hasPrefix("tt") && ($0.type == "movie" || $0.type == "series") }
-            .filter { $0.isWatched || $0.timeOffset > 0 || $0.isInLibrary }
-            .sorted { $0.sortDate > $1.sortDate }
-        let seedList = Array(seeds.prefix(8))
-        let key = (profileId ?? "") + "|" + seedList.map(\.id).joined(separator: ",")
+        let seeds = TasteRecommender.seeds(from: library)
+        let key = (profileId ?? "") + "|" + seeds.map(\.0.id).joined(separator: ",") + "|" + (TMDB.isConfigured ? "t" : "")
         guard force || key != loadedKey else { return }
         loadedKey = key
         loading = recommended.isEmpty && trending.isEmpty
 
         let known = Set(library.filter { $0.isWatched || $0.isInLibrary || $0.isInContinueWatching }.map(\.id))
 
-        // Recommendations for each seed title, in parallel.
+        // Trending: Cinemeta's Popular movies and shows, alternated.
+        async let popularMovies = Cinemeta.catalog(type: "movie", id: "top")
+        async let popularShows = Cinemeta.catalog(type: "series", id: "top")
+        async let tmdbPicks = TMDB.isConfigured ? tmdbRecommendations(seeds: seeds.prefix(8).map(\.0), known: known) : []
+
+        let seeded = await TasteRecommender.features(for: seeds)
+        let taste = TasteRecommender.taste(seeded)
+
+        var rec: [MetaItem] = []
+        var fresh: [MetaItem] = []
+        var because: [Row] = []
+        if !taste.isEmpty {
+            async let candidates = TasteRecommender.pool(TasteRecommender.requests(for: taste))
+            async let newCandidates = TasteRecommender.pool(TasteRecommender.requests(for: taste, catalogs: ["year"], genresPerType: 2))
+            rec = TasteRecommender.rank(await candidates, taste: taste, excluding: known, limit: 24)
+            fresh = TasteRecommender.rank(await newCandidates, taste: taste, excluding: known.union(rec.map(\.id)), limit: 20, minRating: 6.0)
+
+            // Because You Watched: the two most recent titles you finished or are watching.
+            let anchors = seeded.filter { $0.0.isWatched || $0.0.timeOffset > 0 }.prefix(2)
+            for (entry, _, f) in anchors {
+                var t = Taste()
+                t.add(f, type: entry.type, weight: 1)
+                var reqs: [(type: String, catalog: String, genre: String?)] = []
+                for g in f.genres.prefix(2) { reqs += [(entry.type, "top", g), (entry.type, "imdbRating", g)] }
+                let row = TasteRecommender.rank(await TasteRecommender.pool(reqs), taste: t,
+                                                excluding: known.union([entry.id]), limit: 15, perGenre: 15)
+                if row.count >= 4 {
+                    because.append(Row(id: "because-\(entry.id)", title: "Because You Watched \(entry.name)", items: row))
+                }
+            }
+        }
+
+        // With a TMDB key, alternate its picks into Recommended for You.
+        let tmdb = await tmdbPicks
+        if !tmdb.isEmpty {
+            var merged: [MetaItem] = []
+            var seen = Set<String>()
+            for i in 0..<max(rec.count, tmdb.count) {
+                for list in [rec, tmdb] where i < list.count && seen.insert(list[i].id).inserted { merged.append(list[i]) }
+            }
+            rec = Array(merged.prefix(24))
+        }
+
+        let movies = await popularMovies, shows = await popularShows
+        var trend: [MetaItem] = []
+        for i in 0..<max(movies.count, shows.count) {
+            if i < movies.count { trend.append(movies[i]) }
+            if i < shows.count { trend.append(shows[i]) }
+        }
+        trend = Array(trend.filter { !known.contains($0.id) }.prefix(20))
+
+        // A profile switch while this was loading makes these results stale.
+        guard key == loadedKey else { return }
+        recommended = rec
+        trending = trend
+        newForYou = fresh
+        becauseYouWatched = because
+        loading = false
+    }
+
+    /// TMDB's "recommended because you watched" picks, combined across recent titles.
+    private func tmdbRecommendations(seeds: [LibraryEntry], known: Set<String>) async -> [MetaItem] {
         let perSeed: [(Int, [TMDB.Item])] = await withTaskGroup(of: (Int, [TMDB.Item]).self) { group in
-            for (i, seed) in seedList.enumerated() {
+            for (i, seed) in seeds.enumerated() {
                 group.addTask {
                     let base = String(seed.id.split(separator: ":").first ?? Substring(seed.id))
                     guard let ref = await TMDB.tmdbId(imdb: base, type: seed.type) else { return (i, []) }
@@ -236,11 +291,8 @@ final class RecommendationsModel {
             }
             var out: [(Int, [TMDB.Item])] = []
             for await r in group { out.append(r) }
-            return out.sorted { $0.0 < $1.0 }
+            return out
         }
-        async let trendingItems = TMDB.trending()
-
-        // Titles recommended by several recent favourites rank highest; newer seeds count more.
         var score: [String: Double] = [:]
         var items: [String: TMDB.Item] = [:]
         for (i, recs) in perSeed {
@@ -250,40 +302,18 @@ final class RecommendationsModel {
                 items[item.key] = item
             }
         }
-        let topKeys = score.sorted { $0.value > $1.value }.map(\.key).prefix(30)
-        let trend = await trendingItems
-
-        // Resolve the IMDb ids Stremio's addons use, then drop titles already watched or saved.
-        func resolve(_ list: [TMDB.Item], limit: Int) async -> [MetaItem] {
-            let resolved: [(Int, MetaItem?)] = await withTaskGroup(of: (Int, MetaItem?).self) { group in
-                for (i, item) in list.enumerated() {
-                    group.addTask {
-                        guard let imdb = await TMDB.imdbId(kind: item.kind, id: item.id) else { return (i, nil) }
-                        return (i, item.meta(imdb: imdb))
-                    }
+        let top = score.sorted { $0.value > $1.value }.prefix(24).compactMap { items[$0.key] }
+        let resolved: [(Int, MetaItem?)] = await withTaskGroup(of: (Int, MetaItem?).self) { group in
+            for (i, item) in top.enumerated() {
+                group.addTask {
+                    guard let imdb = await TMDB.imdbId(kind: item.kind, id: item.id) else { return (i, nil) }
+                    return (i, item.meta(imdb: imdb))
                 }
-                var out: [(Int, MetaItem?)] = []
-                for await r in group { out.append(r) }
-                return out
             }
-            return resolved.sorted { $0.0 < $1.0 }.compactMap(\.1).filter { !known.contains($0.id) }.prefix(limit).map { $0 }
+            var out: [(Int, MetaItem?)] = []
+            for await r in group { out.append(r) }
+            return out
         }
-
-        let rec = await resolve(topKeys.compactMap { items[$0] }, limit: 20)
-        let trendMetas = await resolve(Array(trend.prefix(24)), limit: 20)
-        var because: [Row] = []
-        for (i, recs) in perSeed.prefix(2) where !recs.isEmpty {
-            let row = await resolve(Array(recs.prefix(20)), limit: 15)
-            if row.count >= 4 {
-                because.append(Row(id: "because-\(seedList[i].id)", title: "Because You Watched \(seedList[i].name)", items: row))
-            }
-        }
-
-        // A profile switch while this was loading makes these results stale.
-        guard key == loadedKey else { return }
-        recommended = rec
-        trending = trendMetas
-        becauseYouWatched = because
-        loading = false
+        return resolved.sorted { $0.0 < $1.0 }.compactMap(\.1).filter { !known.contains($0.id) }
     }
 }

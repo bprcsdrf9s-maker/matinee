@@ -32,6 +32,15 @@ extension KeyedDecodingContainer {
         ((try? decodeIfPresent([Lossy<T>].self, forKey: key)) ?? nil)?.compactMap(\.value) ?? []
     }
 
+    /// A list of names sent as an array, or as one comma-separated string.
+    func nameList(_ key: Key) -> [String] {
+        if let a = try? decodeIfPresent([String].self, forKey: key) { return a.filter { !$0.isEmpty } }
+        if let s = try? decodeIfPresent(String.self, forKey: key) {
+            return s.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+        return []
+    }
+
     func url(_ key: Key) -> URL? {
         guard let s = flexibleString(key)?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
         return URL(string: s)
@@ -170,12 +179,19 @@ struct MetaItem: Decodable, Identifiable, Hashable {
     let genres: [String]
     let videos: [Video]
     let defaultVideoId: String?
+    /// People and popularity, used to recommend similar titles (Cinemeta sends these).
+    let directors: [String]
+    let writers: [String]
+    let cast: [String]
+    let popularity: Double?
 
     struct BehaviorHints: Decodable { let defaultVideoId: String? }
+    struct Link: Decodable { let name: String?; let category: String? }
 
     enum CodingKeys: String, CodingKey {
         case id, type, name, poster, background, logo, posterShape, description, releaseInfo, year
         case runtime, imdbRating, genres, genre, videos, behaviorHints
+        case director, writer, cast, links, popularity
     }
 
     init(from decoder: Decoder) throws {
@@ -193,9 +209,20 @@ struct MetaItem: Decodable, Identifiable, Hashable {
         imdbRating = c.flexibleString(.imdbRating)
         let g = (try? c.decodeIfPresent([String].self, forKey: .genres)) ?? nil
         let g2 = (try? c.decodeIfPresent([String].self, forKey: .genre)) ?? nil
-        genres = g ?? g2 ?? []
+        let listedGenres = g ?? g2 ?? []
         videos = c.lossyArray(Video.self, .videos)
         defaultVideoId = ((try? c.decodeIfPresent(BehaviorHints.self, forKey: .behaviorHints)) ?? nil)?.defaultVideoId
+        let links = c.lossyArray(Link.self, .links)
+        func fromLinks(_ category: String) -> [String] {
+            links.filter { $0.category == category }.compactMap(\.name)
+        }
+        let d = c.nameList(.director), w = c.nameList(.writer), ca = c.nameList(.cast)
+        directors = d.isEmpty ? fromLinks("Directors") : d
+        writers = w.isEmpty ? fromLinks("Writers") : w
+        cast = ca.isEmpty ? fromLinks("Cast") : ca
+        genres = listedGenres.isEmpty ? fromLinks("Genres") : listedGenres
+        if let p = try? c.decodeIfPresent(Double.self, forKey: .popularity) { popularity = p }
+        else { popularity = c.flexibleString(.popularity).flatMap(Double.init) }
     }
 
     init(id: String, type: String, name: String, poster: URL?, background: URL? = nil, posterShape: String? = nil) {
@@ -203,6 +230,7 @@ struct MetaItem: Decodable, Identifiable, Hashable {
         self.posterShape = posterShape
         logo = nil; description = nil; releaseInfo = nil; runtime = nil
         imdbRating = nil; genres = []; videos = []; defaultVideoId = nil
+        directors = []; writers = []; cast = []; popularity = nil
     }
 
     /// A preview built from another catalog (TMDB). The full details load from the addons when opened.
@@ -211,6 +239,7 @@ struct MetaItem: Decodable, Identifiable, Hashable {
         self.id = id; self.type = type; self.name = name; self.poster = poster; self.background = background
         self.description = description; self.releaseInfo = releaseInfo; self.imdbRating = imdbRating
         posterShape = nil; logo = nil; runtime = nil; genres = []; videos = []; defaultVideoId = nil
+        directors = []; writers = []; cast = []; popularity = nil
     }
 
     static func == (l: MetaItem, r: MetaItem) -> Bool { l.id == r.id && l.type == r.type }

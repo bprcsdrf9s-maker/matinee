@@ -280,7 +280,7 @@ struct TVTMDBKeySection: View {
             Button(checking ? "Checking…" : (TMDB.isConfigured ? "Update Key" : "Save Key")) {
                 Task {
                     checking = true
-                    status = await TMDB.validate(key) ? "Key works. Recommendations will show on Home."
+                    status = await TMDB.validate(key) ? "Key works. TMDB picks will mix into Recommended for You."
                                                       : "TMDB didn't accept that key."
                     checking = false
                 }
@@ -294,9 +294,9 @@ struct TVTMDBKeySection: View {
                 }
             }
         } header: {
-            Text("Recommendations")
+            Text("TMDB (optional)")
         } footer: {
-            Text(status ?? "Recommended for You, Trending Now and Because You Watched come from The Movie Database. Get a free key at themoviedb.org → Settings → API.")
+            Text(status ?? "Recommendations work without a key, from what you watch. Optional: a free TMDB key (themoviedb.org → Settings → API) mixes TMDB's picks into Recommended for You.")
         }
     }
 }

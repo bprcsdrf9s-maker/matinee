@@ -287,15 +287,15 @@ struct TMDBKeySection: View {
                 Button("Remove Key", role: .destructive) {
                     TMDB.apiKey = nil
                     key = ""
-                    status = "Removed. Recommendation rows are off."
+                    status = "Removed. Recommendations now come from your watch history only."
                 }
             }
         } header: {
-            Text("Recommendations")
+            Text("TMDB (optional)")
         } footer: {
             VStack(alignment: .leading, spacing: 6) {
                 if let status { Text(status).foregroundStyle(.primary) }
-                Text("\"Recommended for You\", \"Trending Now\" and \"Because You Watched\" come from The Movie Database. Get a free key at themoviedb.org → Settings → API, then paste it here.")
+                Text("Recommendations work without a key: Watcher learns from what you watch, using Stremio's catalogs. Optional: add a free TMDB key (themoviedb.org → Settings → API) to mix TMDB's picks into Recommended for You.")
             }
         }
     }
@@ -304,7 +304,7 @@ struct TMDBKeySection: View {
         checking = true
         defer { checking = false }
         if await TMDB.validate(key) {
-            status = "Key works. Recommendations will show on Home."
+            status = "Key works. TMDB picks will mix into Recommended for You."
         } else {
             status = "TMDB didn't accept that key. Check it and try again."
         }

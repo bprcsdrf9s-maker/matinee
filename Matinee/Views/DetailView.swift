@@ -13,6 +13,7 @@ struct DetailView: View {
     @State private var target: StreamTarget?
     @State private var didAutoplay = false
     @State private var showFullDescription = false
+    @State private var similar: [MetaItem] = []
 
     private var current: MetaItem { meta ?? preview }
     private var entry: LibraryEntry? { model.entry(for: preview.id) }
@@ -35,6 +36,13 @@ struct DetailView: View {
                     .frame(maxWidth: 820, alignment: .leading)
                     .padding(.horizontal, sizing.hPad)
                 }
+                if !similar.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        RowHeader(title: "More Like This").padding(.horizontal, sizing.hPad)
+                        PosterRow(items: similar)
+                    }
+                    .padding(.top, 36)
+                }
             }
             .padding(.bottom, 40)
         }
@@ -48,6 +56,11 @@ struct DetailView: View {
                 .presentationDragIndicator(.visible)
         }
         .task { await load() }
+        .task(id: loaded) {
+            guard loaded, similar.isEmpty else { return }
+            let known = Set(model.library.filter { $0.isWatched || $0.isInLibrary }.map(\.id))
+            similar = await TasteRecommender.similar(to: current, known: known)
+        }
     }
 
     // MARK: Header
