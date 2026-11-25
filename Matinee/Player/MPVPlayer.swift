@@ -101,6 +101,8 @@ final class MPVPlayer: ObservableObject {
         set("demuxer-max-back-bytes", "100MiB")
         set("network-timeout", "30")
         set("alang", options.audioLanguages)
+        set("audio-exclusive", "yes")
+
         set("subs-match-os-language", "no")
         if options.autoSubtitles {
             set("slang", options.subtitleLanguages)
