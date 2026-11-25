@@ -1,5 +1,5 @@
 #!/bin/bash
-# Publishes Matinee.ipa as a GitHub release, plus an AltStore source (source.json) that
+# Publishes Watcher.ipa as a GitHub release, plus an AltStore source (source.json) that
 # always points at the newest build: https://github.com/<you>/<repo>/releases/latest/download/source.json
 set -euo pipefail
 
@@ -7,7 +7,7 @@ set -euo pipefail
 VERSION="1.0.${BUILD_NUMBER}"
 TAG="build-${BUILD_NUMBER}"
 BASE="https://github.com/${REPO}/releases/download/${TAG}"
-SIZE=$(stat -f%z Matinee.ipa 2>/dev/null || stat -c%s Matinee.ipa)
+SIZE=$(stat -f%z Watcher.ipa 2>/dev/null || stat -c%s Watcher.ipa)
 DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 cp Matinee/Assets.xcassets/AppIcon.appiconset/icon-1024.png icon.png
@@ -34,7 +34,7 @@ cat > source.json <<JSON
           "buildVersion": "${BUILD_NUMBER}",
           "date": "${DATE}",
           "size": ${SIZE},
-          "downloadURL": "${BASE}/Matinee.ipa",
+          "downloadURL": "${BASE}/Watcher.ipa",
           "minOSVersion": "18.0"
         }
       ],
@@ -49,12 +49,12 @@ cat > source.json <<JSON
 JSON
 
 NOTES="Build ${BUILD_NUMBER}. Install through AltStore or SideStore with the source link: https://github.com/${REPO}/releases/latest/download/source.json"
-ASSETS=(Matinee.ipa source.json icon.png)
-if [ -f Matinee-AppleTV-Xcode.zip ]; then
-  ASSETS+=(Matinee-AppleTV-Xcode.zip)
+ASSETS=(Watcher.ipa source.json icon.png)
+if [ -f Watcher-AppleTV-Xcode.zip ]; then
+  ASSETS+=(Watcher-AppleTV-Xcode.zip)
   NOTES="${NOTES}
 
-Apple TV: download Matinee-AppleTV-Xcode.zip, open Matinee.xcodeproj on a Mac and run the MatineeTV scheme on your Apple TV (steps in README-Apple-TV.txt)."
+Apple TV: download Watcher-AppleTV-Xcode.zip, open Matinee.xcodeproj on a Mac and run the MatineeTV scheme on your Apple TV (steps in README-Apple-TV.txt)."
 elif [ -f tvos-errors.txt ]; then
   NOTES="${NOTES}
 

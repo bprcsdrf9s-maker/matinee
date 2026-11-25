@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds an unsigned Matinee.ipa. AltStore/SideStore sign it with your Apple ID when installing.
+# Builds an unsigned Watcher.ipa. AltStore/SideStore sign it with your Apple ID when installing.
 set -euo pipefail
 
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
@@ -20,7 +20,7 @@ if [ ! -f "MatineeTV/Assets.xcassets/App Icon & Top Shelf Image.brandassets/Cont
 fi
 xcodegen generate
 
-rm -rf build Payload Matinee.ipa
+rm -rf build Payload Watcher.ipa
 set +e
 xcodebuild \
   -project Matinee.xcodeproj \
@@ -54,13 +54,13 @@ fi
 APP=build/Build/Products/Release-iphoneos/Matinee.app
 mkdir -p Payload
 cp -R "$APP" Payload/
-zip -qry Matinee.ipa Payload
+zip -qry Watcher.ipa Payload
 rm -rf Payload
-echo "Built Matinee.ipa ($VERSION, build $BUILD_NUMBER), $(du -h Matinee.ipa | cut -f1)"
+echo "Built Watcher.ipa ($VERSION, build $BUILD_NUMBER), $(du -h Watcher.ipa | cut -f1)"
 
 # Apple TV: compile to check it builds, then package a ready-to-open Xcode project for installing
 # from a Mac (Xcode signs it with your Apple ID). A failure here doesn't stop the iPhone release.
-rm -f Matinee-AppleTV-Xcode.zip tvos-errors.txt
+rm -f Watcher-AppleTV-Xcode.zip tvos-errors.txt
 set +e
 xcodebuild \
   -project Matinee.xcodeproj \
@@ -87,11 +87,11 @@ else
   # Bake this build's version into the project so Xcode on the Mac shows the same number.
   sed -i '' "s/MARKETING_VERSION: \"1.0\"/MARKETING_VERSION: \"$VERSION\"/; s/CURRENT_PROJECT_VERSION: \"1\"/CURRENT_PROJECT_VERSION: \"$BUILD_NUMBER\"/" project.yml
   xcodegen generate
-  rm -rf pkg && mkdir -p pkg/Matinee
-  cp -R project.yml Matinee.xcodeproj Matinee MatineeTV pkg/Matinee/
-  cp ci/AppleTV-README.txt pkg/Matinee/README-Apple-TV.txt
-  (cd pkg && zip -qry ../Matinee-AppleTV-Xcode.zip Matinee)
+  rm -rf pkg && mkdir -p pkg/Watcher
+  cp -R project.yml Matinee.xcodeproj Matinee MatineeTV pkg/Watcher/
+  cp ci/AppleTV-README.txt pkg/Watcher/README-Apple-TV.txt
+  (cd pkg && zip -qry ../Watcher-AppleTV-Xcode.zip Watcher)
   rm -rf pkg
   git checkout -- project.yml 2>/dev/null || true
-  echo "Built the Apple TV app and packaged Matinee-AppleTV-Xcode.zip ($(du -h Matinee-AppleTV-Xcode.zip | cut -f1))"
+  echo "Built the Apple TV app and packaged Watcher-AppleTV-Xcode.zip ($(du -h Watcher-AppleTV-Xcode.zip | cut -f1))"
 fi
