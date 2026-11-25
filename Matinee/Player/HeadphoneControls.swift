@@ -1,4 +1,4 @@
-#if os(iOS)
+#if os(iOS) || os(tvOS)
 import AVFoundation
 import MediaPlayer
 import UIKit
@@ -35,6 +35,12 @@ final class HeadphoneControls {
     /// How long after headphones disconnect we still resume when they come back.
     private static let resumeWindow: TimeInterval = 5 * 60
 
+    /// When the player last handled a Play/Pause press itself (the Siri Remote on Apple TV).
+    /// If the same press also arrives as a remote command, it's ignored so it doesn't toggle twice.
+    private static var lastLocalPress = Date.distantPast
+    static func noteLocalPress() { lastLocalPress = Date() }
+    private static var justPressedLocally: Bool { Date().timeIntervalSince(lastLocalPress) < 0.5 }
+
     init(title: String, subtitle: String?, handlesCommands: Bool, actions: Actions) {
         self.title = title
         self.subtitle = subtitle
@@ -50,14 +56,16 @@ final class HeadphoneControls {
         let center = MPRemoteCommandCenter.shared()
 
         add(center.playCommand) { [weak self] in
+            guard !Self.justPressedLocally else { return }
             self?.pausedByRouteAt = nil
             self?.actions.play()
         }
         add(center.pauseCommand) { [weak self] in
+            guard !Self.justPressedLocally else { return }
             self?.actions.pause()
         }
         add(center.togglePlayPauseCommand) { [weak self] in
-            guard let self else { return }
+            guard let self, !Self.justPressedLocally else { return }
             self.pausedByRouteAt = nil
             if self.actions.isPaused() { self.actions.play() } else { self.actions.pause() }
         }
