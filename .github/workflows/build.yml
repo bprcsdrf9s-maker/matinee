@@ -1,6 +1,6 @@
-name: Build Matinee
+name: Build Watcher
 
-# Builds an unsigned Matinee.ipa on a GitHub-hosted Mac and publishes it as a release with an
+# Builds an unsigned Watcher.ipa on a GitHub-hosted Mac and publishes it as a release with an
 # AltStore/SideStore source. If the repo holds an uploaded Matinee.zip or Matinee.tar.xz instead of
 # the project files, the first run unpacks it and commits the files, so later edits can be made file by file.
 
