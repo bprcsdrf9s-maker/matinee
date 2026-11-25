@@ -1,4 +1,4 @@
-# Matinee
+# Watcher
 
 A native iPhone and iPad app for your Stremio account.
 
